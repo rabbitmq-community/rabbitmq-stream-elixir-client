@@ -10,8 +10,10 @@ defmodule RabbitMQStream.Connection.Handler do
     Logger.debug("Connection close requested by server: #{request.data.code} #{request.data.reason}")
     Logger.debug("Connection closed")
 
-    %{conn | state: :closing, close_reason: request.data.reason}
+    conn
+    |> Map.put(:close_reason, request.data.reason)
     |> Helpers.push_internal(:response, :close, correlation_id: request.correlation_id, code: :ok)
+    |> transition(:closing)
   end
 
   def handle_message(%Connection{} = conn, %Request{command: :tune} = request) do
@@ -21,9 +23,11 @@ defmodule RabbitMQStream.Connection.Handler do
 
     options = Keyword.merge(conn.options, frame_max: request.data.frame_max, heartbeat: request.data.heartbeat)
 
-    %{conn | options: options, state: :opening}
+    conn
+    |> Map.put(:options, options)
     |> Helpers.push_internal(:response, :tune, correlation_id: 0)
     |> Helpers.push_internal(:request, :open)
+    |> transition(:opening)
   end
 
   def handle_message(%Connection{} = conn, %Request{command: :heartbeat}) do
@@ -57,7 +61,7 @@ defmodule RabbitMQStream.Connection.Handler do
 
     GenServer.reply(pid, :ok)
 
-    %{conn | state: :closing}
+    transition(conn, :closed)
   end
 
   def handle_message(%Connection{} = conn, %Response{code: code})
@@ -75,7 +79,9 @@ defmodule RabbitMQStream.Connection.Handler do
       GenServer.reply(request, {:error, code})
     end
 
-    %{conn | state: :closing, close_reason: code}
+    conn
+    |> Map.put(:close_reason, code)
+    |> transition(:closing)
   end
 
   def handle_message(%Connection{} = conn, %Response{command: :credit, code: code})
@@ -148,7 +154,7 @@ defmodule RabbitMQStream.Connection.Handler do
 
     conn
     |> Helpers.push_internal(:request, :open)
-    |> Map.put(:state, :opening)
+    |> transition(:opening)
   end
 
   def handle_message(%Connection{} = conn, %Response{command: :tune} = response) do
@@ -158,8 +164,8 @@ defmodule RabbitMQStream.Connection.Handler do
     options = Keyword.merge(conn.options, frame_max: response.data.frame_max, heartbeat: response.data.heartbeat)
 
     %{conn | options: options}
-    |> Map.put(:state, :opening)
     |> Helpers.push_internal(:request, :open)
+    |> transition(:opening)
   end
 
   # If the server has a version lower than 3.13, this is the 'terminating' response.
@@ -176,7 +182,10 @@ defmodule RabbitMQStream.Connection.Handler do
 
     send(self(), :flush_request_buffer)
 
-    %{conn | state: :open, connect_requests: [], connection_properties: response.data.connection_properties}
+    conn
+    |> Map.put(:connect_requests, [])
+    |> Map.put(:connection_properties, response.data.connection_properties)
+    |> transition(:open)
   end
 
   def handle_message(
@@ -272,7 +281,10 @@ defmodule RabbitMQStream.Connection.Handler do
     end
 
     send(self(), :flush_request_buffer)
-    %{conn | state: :open, connect_requests: [], commands: commands}
+
+    conn
+    |> Map.merge(%{connect_requests: [], commands: commands})
+    |> transition(:open)
   end
 
   def handle_message(%Connection{} = conn, %Response{command: command, data: data} = response)
@@ -312,5 +324,15 @@ defmodule RabbitMQStream.Connection.Handler do
         code: :internal_error
       )
     end
+  end
+
+  @doc """
+  Transitions the lifecycle of the connection to the given state, while notifying all monitors.
+
+  Always call this function after all the state manipulation of the transition is done.
+  """
+  def transition(%Connection{} = conn, to) when is_atom(to) do
+    # TODO: Telemetry events
+    %{conn | state: to}
   end
 end

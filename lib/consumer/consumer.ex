@@ -308,7 +308,7 @@ defmodule RabbitMQStream.Consumer do
           credits: non_neg_integer(),
           initial_credit: non_neg_integer(),
           initial_offset: RabbitMQStream.Connection.offset(),
-          properties: [RabbitMQStream.Message.Types.ConsumerequestData.property()],
+          properties: [RabbitMQStream.Message.Types.SubscribeRequestData.property()],
           consumer_module: module()
         }
 
@@ -321,7 +321,7 @@ defmodule RabbitMQStream.Consumer do
           | {:offset_tracking, [{RabbitMQStream.Consumer.OffsetTracking.t(), term()}]}
           | {:flow_control, {RabbitMQStream.Consumer.FlowControl.t(), term()}}
           | {:private, any()}
-          | {:properties, [RabbitMQStream.Message.Types.ConsumerequestData.property()]}
+          | {:properties, [RabbitMQStream.Message.Types.SubscribeRequestData.property()]}
 
   @type opts :: [option()]
 end

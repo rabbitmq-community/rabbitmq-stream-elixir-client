@@ -88,6 +88,9 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
               offset
 
             _ ->
+              # We don't need to default to anything other than '0' here since any possibly duplicate
+              # messages received after a 'resubscribe' would be filtered by the ':deliver' handler
+              # bellow, since it persists the 'last_offset' of each chunk.
               0
           end
 
@@ -122,56 +125,113 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
   end
 
   @impl true
+  # The 'resubscribe' flow is not necessarily the same as 'init'.
+  def handle_info({:resubscribe, _args}, state) do
+    # The 'args' we receive are the ones we
+    Logger.info("Connection has shut down. Re-executing 'subscribe' flow")
+
+    # If we had a 'last_offset' set, we should to use it.
+    last_offset =
+      if state.last_offset != 0 do
+        {:offset, state.last_offset}
+      else
+        # Or else, we should follow the same setup flow of fetching the offset from the stream
+        case RabbitMQStream.Connection.query_offset(state.connection, state.stream_name, state.offset_reference) do
+          {:ok, offset} ->
+            {:offset, offset}
+
+          _ ->
+            state.initial_offset
+        end
+      end
+
+    case RabbitMQStream.Connection.subscribe(
+           state.connection,
+           state.stream_name,
+           self(),
+           last_offset,
+           state.initial_credit,
+           state.properties
+         ) do
+      {:ok, id} ->
+        last_offset =
+          case last_offset do
+            {:offset, offset} ->
+              offset
+
+            _ ->
+              0
+          end
+
+        # A consumer should always update its own id
+        {:noreply, %{state | id: id, last_offset: last_offset}}
+
+      err ->
+        {:stop, err, state}
+    end
+  end
+
   def handle_info({:deliver, %DeliverData{osiris_chunk: %RabbitMQStream.OsirisChunk{} = chunk}}, state) do
-    if function_exported?(state.consumer_module, :handle_chunk, 2) do
-      apply(state.consumer_module, :handle_chunk, [chunk, state])
-    end
-
-    for message <- Enum.slice(chunk.data_entries, (state.last_offset - chunk.chunk_id)..chunk.num_entries) do
-      message =
-        if function_exported?(state.consumer_module, :decode!, 1) do
-          apply(state.consumer_module, :decode!, [message])
-        else
-          message
-        end
-
-      if filtered?(message, state) do
-        if function_exported?(state.consumer_module, :handle_message, 3) do
-          apply(state.consumer_module, :handle_message, [message, chunk, state])
-        end
-
-        if function_exported?(state.consumer_module, :handle_message, 2) do
-          apply(state.consumer_module, :handle_message, [message, state])
-        end
-
-        if function_exported?(state.consumer_module, :handle_message, 1) do
-          apply(state.consumer_module, :handle_message, [message])
-        end
+    # If some of the messages in the chunk we haven't yet processed, we can go forward with the processing.
+    # We do this check since a connection can fail, and be automatically reset by the client. In this
+    # case we fast forward any repeated messages since the last offset store
+    if chunk.chunk_id + chunk.num_entries > state.last_offset do
+      if function_exported?(state.consumer_module, :handle_chunk, 2) do
+        apply(state.consumer_module, :handle_chunk, [chunk, state])
       end
-    end
 
-    # Based on the [Python implementation](https://github.com/qweeze/rstream/blob/a81176a5c7cf4accaee25ca7725bd7bd94bf0ce8/rstream/consumer.py#L327),
-    # it seems to be OK to sum the amount of messages received to the chunk_id, which represents
-    # the offset of the first message, to get the new `last_offset` for the messages.
-    # During the second iteration of this logic to get the `last_offset`, I attempted to use the
-    # `commited_offset` of the DeliveryData, thinking it was already the offset for the `next` messsage,
-    # but it isn't.
-    state = %{state | last_offset: chunk.chunk_id + chunk.num_entries}
+      for message <- Enum.slice(chunk.data_entries, (state.last_offset - chunk.chunk_id)..chunk.num_entries) do
+        message =
+          if function_exported?(state.consumer_module, :decode!, 1) do
+            apply(state.consumer_module, :decode!, [message])
+          else
+            message
+          end
 
-    offset_tracking =
-      for {strategy, track_state} <- state.offset_tracking do
-        if function_exported?(strategy, :after_chunk, 3) do
-          {strategy, strategy.after_chunk(track_state, chunk, state)}
-        else
-          {strategy, track_state}
+        if filtered?(message, state) do
+          if function_exported?(state.consumer_module, :handle_message, 3) do
+            apply(state.consumer_module, :handle_message, [message, chunk, state])
+          end
+
+          if function_exported?(state.consumer_module, :handle_message, 2) do
+            apply(state.consumer_module, :handle_message, [message, state])
+          end
+
+          if function_exported?(state.consumer_module, :handle_message, 1) do
+            apply(state.consumer_module, :handle_message, [message])
+          end
         end
       end
 
-    state = %{state | offset_tracking: offset_tracking, credits: state.credits - chunk.num_entries}
+      # Based on the [Python implementation](https://github.com/qweeze/rstream/blob/a81176a5c7cf4accaee25ca7725bd7bd94bf0ce8/rstream/consumer.py#L327),
+      # it seems to be OK to sum the amount of messages received to the chunk_id, which represents
+      # the offset of the first message, to get the new `last_offset` for the messages.
+      # During the second iteration of this logic to get the `last_offset`, I attempted to use the
+      # `commited_offset` of the DeliveryData, thinking it was already the offset for the `next` messsage,
+      # but it isn't.
+      state = %{state | last_offset: chunk.chunk_id + chunk.num_entries}
 
-    state = state |> OffsetTracking.run() |> FlowControl.run()
+      offset_tracking =
+        for {strategy, track_state} <- state.offset_tracking do
+          if function_exported?(strategy, :after_chunk, 3) do
+            {strategy, strategy.after_chunk(track_state, chunk, state)}
+          else
+            {strategy, track_state}
+          end
+        end
 
-    {:noreply, state}
+      state = %{state | offset_tracking: offset_tracking, credits: state.credits - chunk.num_entries}
+
+      state = state |> OffsetTracking.run() |> FlowControl.run()
+
+      {:noreply, state}
+    else
+      Logger.debug(
+        "#{state.consumer_module}: Received already processed chunk, possibly due to reconnection. Fast fowarding."
+      )
+
+      {:noreply, state}
+    end
   end
 
   def handle_info(:run_offset_tracking, state) do
@@ -182,7 +242,10 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
     {:noreply, FlowControl.run(state)}
   end
 
-  def handle_info({:command, %Request{command: :consumer_update, data: data} = request}, state) do
+  def handle_info(
+        {:command, %Request{command: :consumer_update, data: data} = request},
+        %RabbitMQStream.Consumer{} = state
+      ) do
     if function_exported?(state.consumer_module, :handle_update, 2) do
       action = if data.active, do: :upgrade, else: :downgrade
 
@@ -194,15 +257,15 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
       case apply(state.consumer_module, :handle_update, [state, action]) do
         {:ok, offset} ->
           Logger.debug("Consumer upgraded to active consumer")
-          RabbitMQStream.Connection.respond(state.connection, request, offset: offset, code: :ok)
+          RabbitMQStream.Connection.respond(state.connection, state.id, request, offset: offset, code: :ok)
 
         {:error, reason} ->
           Logger.error("Error updating consumer: #{inspect(reason)}")
-          RabbitMQStream.Connection.respond(state.connection, request, code: :internal_error)
+          RabbitMQStream.Connection.respond(state.connection, state.id, request, code: :internal_error)
       end
     else
       Logger.error("handle_update/2 must be implemented when using single-active-consumer property")
-      RabbitMQStream.Connection.respond(state.connection, request, code: :internal_error)
+      RabbitMQStream.Connection.respond(state.connection, state.id, request, code: :internal_error)
     end
 
     {:noreply, state}
@@ -210,6 +273,7 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
 
   @impl true
   def handle_cast({:credit, amount}, state) do
+    # Should be sent to same connection
     RabbitMQStream.Connection.credit(state.connection, state.id, amount)
     {:noreply, %{state | credits: state.credits + amount}}
   end

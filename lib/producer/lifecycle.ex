@@ -49,6 +49,20 @@ defmodule RabbitMQStream.Producer.LifeCycle do
   end
 
   @impl GenServer
+  def handle_info({:redeclare_producer, _opts}, state) do
+    # Since the connection has changed, we need to update the producer's own ID. This shouldn't be
+    # an issue.
+    with {:ok, id} <-
+           RabbitMQStream.Connection.declare_producer(state.connection, state.stream_name, state.reference_name) do
+      # The sequence number should have changed
+      {:noreply, %{state | id: id}}
+    else
+      err ->
+        {:stop, err, state}
+    end
+  end
+
+  @impl GenServer
   def terminate(_reason, %{id: nil}), do: :ok
 
   def terminate(_reason, state) do

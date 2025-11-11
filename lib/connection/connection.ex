@@ -80,8 +80,8 @@ defmodule RabbitMQStream.Connection do
   """
 
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts], location: :keep do
-      @opts opts
+    quote location: :keep do
+      @opts unquote(opts)
 
       def start_link(opts \\ []) when is_list(opts) do
         opts =
@@ -130,6 +130,15 @@ defmodule RabbitMQStream.Connection do
           __MODULE__,
           stream_name,
           producer_reference
+        )
+      end
+
+      def declare_producer(stream_name, producer_reference, producer_id) do
+        RabbitMQStream.Connection.declare_producer(
+          __MODULE__,
+          stream_name,
+          producer_reference,
+          producer_id
         )
       end
 
@@ -203,8 +212,8 @@ defmodule RabbitMQStream.Connection do
         RabbitMQStream.Connection.delete_super_stream(__MODULE__, name)
       end
 
-      def respond(request, opts) do
-        RabbitMQStream.Connection.respond(__MODULE__, request, opts)
+      def respond(subscription_id, request, opts) do
+        RabbitMQStream.Connection.respond(__MODULE__, subscription_id, request, opts)
       end
     end
   end
@@ -303,7 +312,16 @@ defmodule RabbitMQStream.Connection do
              is_binary(stream_name) do
     GenServer.call(
       server,
-      {:declare_producer, stream_name: stream_name, producer_reference: producer_reference}
+      {:declare_producer, stream_name: stream_name, producer_reference: producer_reference, pid: self()}
+    )
+  end
+
+  def declare_producer(server, stream_name, producer_reference, producer_id)
+      when is_binary(producer_reference) and
+             is_binary(stream_name) and is_integer(producer_id) do
+    GenServer.call(
+      server,
+      {:declare_producer, stream_name: stream_name, producer_reference: producer_reference, producer_id: producer_id}
     )
   end
 
@@ -396,7 +414,6 @@ defmodule RabbitMQStream.Connection do
              is_integer(credit) and
              is_offset(offset) and
              is_list(properties) and
-             is_pid(pid) and
              credit >= 0 do
     GenServer.call(
       server,
@@ -489,15 +506,15 @@ defmodule RabbitMQStream.Connection do
   offset. So the connection sends the request to the subscription handler, which then calls
   this function to send the response back to the server.
   """
-  def respond(server, request, opts) when is_list(opts) do
-    GenServer.cast(server, {:respond, request, opts})
+  def respond(server, subscription_id, request, opts) when is_list(opts) do
+    GenServer.cast(server, {:respond, subscription_id: subscription_id, request: request, opts: opts})
   end
 
   @doc """
   Checks if the connected server supports the given command.
   """
   def supports?(server, command, version \\ 1) do
-    GenServer.call(server, {:supports?, command, version})
+    GenServer.call(server, {:supports?, command: command, version: version})
   end
 
   @type offset :: :first | :last | :next | {:offset, non_neg_integer()} | {:timestamp, integer()}
@@ -519,7 +536,7 @@ defmodule RabbitMQStream.Connection do
           producer_sequence: non_neg_integer(),
           subscriber_sequence: non_neg_integer(),
           peer_properties: %{String.t() => term()},
-          connection_properties: Keyword.t(),
+          connection_properties: %{String.t() => String.t()},
           mechanisms: [String.t()],
           connect_requests: [pid()],
           request_tracker: %{{atom(), integer()} => {pid(), any()}},
@@ -545,7 +562,7 @@ defmodule RabbitMQStream.Connection do
     subscriber_sequence: 1,
     subscriptions: %{},
     state: :closed,
-    peer_properties: [],
+    peer_properties: %{},
     connection_properties: [],
     mechanisms: [],
     connect_requests: [],

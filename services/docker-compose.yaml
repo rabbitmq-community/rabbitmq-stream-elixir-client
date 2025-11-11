@@ -3,7 +3,7 @@ services:
     container_name: rabbitmq_stream
     image: rabbitmq:3.13-management
     restart: always
-    hostname: rabbitmq_stream
+    hostname: localhost
     volumes:
       - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
@@ -20,7 +20,7 @@ services:
     container_name: rabbitmq_stream
     image: rabbitmq:3.12-management
     restart: always
-    hostname: rabbitmq_stream
+    hostname: localhost
     volumes:
       - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
@@ -37,7 +37,7 @@ services:
     container_name: rabbitmq_stream
     image: rabbitmq:3.11-management
     restart: always
-    hostname: rabbitmq_stream
+    hostname: localhost
     volumes:
       - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf

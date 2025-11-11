@@ -60,7 +60,7 @@ defmodule RabbitMQStream.Message.Types do
   defmodule OpenResponseData do
     @moduledoc false
     @enforce_keys [:connection_properties]
-    @type t :: %__MODULE__{connection_properties: Keyword.t()}
+    @type t :: %__MODULE__{connection_properties: %{String.t() => String.t()}}
     defstruct [:connection_properties]
   end
 
@@ -167,14 +167,6 @@ defmodule RabbitMQStream.Message.Types do
   end
 
   defmodule QueryMetadataResponseData do
-    @moduledoc false
-    @type t :: %__MODULE__{
-            streams: [StreamData.t()],
-            brokers: [BrokerData.t()]
-          }
-
-    defstruct [:streams, :brokers]
-
     defmodule BrokerData do
       @moduledoc false
       @enforce_keys [:reference, :host, :port]
@@ -208,6 +200,14 @@ defmodule RabbitMQStream.Message.Types do
         :replicas
       ]
     end
+
+    @moduledoc false
+    @type t :: %__MODULE__{
+            streams: [StreamData.t()],
+            brokers: [BrokerData.t()]
+          }
+
+    defstruct [:streams, :brokers]
   end
 
   defmodule MetadataUpdateData do
@@ -222,15 +222,15 @@ defmodule RabbitMQStream.Message.Types do
 
   defmodule DeclareProducerRequestData do
     @moduledoc false
-    @enforce_keys [:id, :producer_reference, :stream_name]
+    @enforce_keys [:producer_id, :producer_reference, :stream_name]
     @type t :: %__MODULE__{
-            id: non_neg_integer(),
+            producer_id: non_neg_integer(),
             producer_reference: String.t(),
             stream_name: String.t()
           }
 
     defstruct [
-      :id,
+      :producer_id,
       :producer_reference,
       :stream_name
     ]
@@ -285,14 +285,6 @@ defmodule RabbitMQStream.Message.Types do
   end
 
   defmodule PublishErrorData do
-    @moduledoc false
-    @enforce_keys [:producer_id, :errors]
-    @type t :: %__MODULE__{
-            producer_id: non_neg_integer(),
-            errors: [Error.t()]
-          }
-    defstruct [:producer_id, :errors]
-
     defmodule Error do
       @moduledoc false
       @enforce_keys [:publishing_id, :code]
@@ -303,6 +295,14 @@ defmodule RabbitMQStream.Message.Types do
 
       defstruct [:publishing_id, :code]
     end
+
+    @moduledoc false
+    @enforce_keys [:producer_id, :errors]
+    @type t :: %__MODULE__{
+            producer_id: non_neg_integer(),
+            errors: [Error.t()]
+          }
+    defstruct [:producer_id, :errors]
   end
 
   defmodule PublishConfirmData do
@@ -460,11 +460,6 @@ defmodule RabbitMQStream.Message.Types do
   end
 
   defmodule ExchangeCommandVersionsData do
-    @moduledoc false
-    @enforce_keys [:commands]
-    @type t :: %__MODULE__{commands: [Command.t()]}
-    defstruct [:commands]
-
     defmodule Command do
       @moduledoc false
       @enforce_keys [:key, :min_version, :max_version]
@@ -475,6 +470,11 @@ defmodule RabbitMQStream.Message.Types do
             }
       defstruct [:key, :min_version, :max_version]
     end
+
+    @moduledoc false
+    @enforce_keys [:commands]
+    @type t :: %__MODULE__{commands: [Command.t()]}
+    defstruct [:commands]
 
     def new!(_opts \\ []) do
       %__MODULE__{
@@ -557,4 +557,55 @@ defmodule RabbitMQStream.Message.Types do
     @type t :: %__MODULE__{}
     defstruct []
   end
+
+  @type t ::
+          TuneData.t()
+          | PeerPropertiesData.t()
+          | SaslHandshakeData.t()
+          | SaslAuthenticateData.t()
+          | OpenRequestData.t()
+          | OpenResponseData.t()
+          | HeartbeatData.t()
+          | CloseRequestData.t()
+          | CloseResponseData.t()
+          | CreateStreamRequestData.t()
+          | CreateStreamResponseData.t()
+          | DeleteStreamRequestData.t()
+          | DeleteStreamResponseData.t()
+          | StoreOffsetRequestData.t()
+          | StoreOffsetResponseData.t()
+          | QueryOffsetRequestData.t()
+          | QueryOffsetResponseData.t()
+          | QueryMetadataRequestData.t()
+          | QueryMetadataResponseData.t()
+          | MetadataUpdateData.t()
+          | DeclareProducerRequestData.t()
+          | DeclareProducerResponseData.t()
+          | DeleteProducerRequestData.t()
+          | DeleteProducerResponseData.t()
+          | QueryProducerSequenceRequestData.t()
+          | QueryProducerSequenceResponseData.t()
+          | PublishData.t()
+          | PublishErrorData.t()
+          | PublishConfirmData.t()
+          | SubscribeRequestData.t()
+          | ConsumerUpdateRequestData.t()
+          | ConsumerUpdateResponseData.t()
+          | UnsubscribeRequestData.t()
+          | CreditRequestData.t()
+          | SubscribeResponseData.t()
+          | UnsubscribeResponseData.t()
+          | CreditResponseData.t()
+          | RouteRequestData.t()
+          | RouteResponseData.t()
+          | PartitionsQueryRequestData.t()
+          | PartitionsQueryResponseData.t()
+          | DeliverData.t()
+          | ExchangeCommandVersionsData.t()
+          | StreamStatsRequestData.t()
+          | StreamStatsResponseData.t()
+          | CreateSuperStreamRequestData.t()
+          | CreateSuperStreamResponseData.t()
+          | DeleteSuperStreamRequestData.t()
+          | DeleteSuperStreamResponseData.t()
 end

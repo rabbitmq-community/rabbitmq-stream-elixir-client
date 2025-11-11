@@ -14,8 +14,6 @@ defmodule RabbitMQStream.Connection.Lifecycle do
 
   @impl GenServer
   def init(opts) do
-    {transport, opts} = Keyword.pop(opts, :transport, :tcp)
-
     opts =
       opts
       |> Keyword.put_new(:host, "localhost")
@@ -26,6 +24,8 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       |> Keyword.put_new(:frame_max, 1_048_576)
       |> Keyword.put_new(:heartbeat, 60)
       |> Keyword.put_new(:transport, :tcp)
+
+    {transport, opts} = Keyword.pop(opts, :transport, :tcp)
 
     transport =
       case transport do
@@ -92,12 +92,21 @@ defmodule RabbitMQStream.Connection.Lifecycle do
   end
 
   def handle_call({:subscribe, opts}, from, %Connection{} = conn) do
-    {id, conn} = Map.get_and_update!(conn, :subscriber_sequence, &{&1, &1 + 1})
+    {opts, conn} =
+      if Keyword.has_key?(opts, :subscription_id) do
+        {opts, conn}
+      else
+        {id, conn} = Map.get_and_update!(conn, :subscriber_sequence, &{&1, &1 + 1})
+
+        opts = Keyword.put(opts, :subscription_id, id)
+
+        {opts, conn}
+      end
 
     conn =
       conn
-      |> Helpers.push_tracker(:subscribe, from, {id, opts[:pid]})
-      |> send_request(:subscribe, opts ++ [subscription_id: id])
+      |> Helpers.push_tracker(:subscribe, from, {opts[:subscription_id], opts[:pid]})
+      |> send_request(:subscribe, opts)
 
     {:noreply, conn}
   end
@@ -111,7 +120,10 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     {:noreply, conn}
   end
 
-  def handle_call({:supports?, command, version}, _from, %Connection{} = conn) do
+  def handle_call({:supports?, opts}, _from, %Connection{} = conn) do
+    command = Keyword.get(opts, :command)
+    version = Keyword.get(opts, :version)
+
     flag =
       case conn.commands do
         %{^command => %{max: max}} when max <= version ->
@@ -161,17 +173,27 @@ defmodule RabbitMQStream.Connection.Lifecycle do
   end
 
   def handle_call({:declare_producer, opts}, from, %Connection{} = conn) do
-    {id, conn} = Map.get_and_update!(conn, :producer_sequence, &{&1, &1 + 1})
+    {opts, conn} =
+      if Keyword.has_key?(opts, :producer_id) do
+        {opts, conn}
+      else
+        {id, conn} = Map.get_and_update!(conn, :producer_sequence, &{&1, &1 + 1})
+
+        opts = Keyword.put(opts, :producer_id, id)
+
+        {opts, conn}
+      end
 
     conn =
       conn
-      |> Helpers.push_tracker(:declare_producer, from, id)
-      |> send_request(:declare_producer, opts ++ [id: id])
+      |> Helpers.push_tracker(:declare_producer, from, opts[:producer_id])
+      |> send_request(:declare_producer, opts)
 
     {:noreply, conn}
   end
 
   @impl GenServer
+  # User facing events should be handled only when the connection is open.
   def handle_cast(action, %Connection{state: state} = conn) when state != :open do
     {:noreply, %{conn | request_buffer: :queue.in({:cast, action}, conn.request_buffer)}}
   end
@@ -208,7 +230,10 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     {:noreply, conn}
   end
 
-  def handle_cast({:respond, %Request{} = request, opts}, %Connection{} = conn) do
+  def handle_cast({:respond, opts}, %Connection{} = conn) do
+    %Request{} = request = Keyword.fetch!(opts, :request)
+    opts = Keyword.fetch!(opts, :opts)
+
     conn =
       conn
       |> send_response(request.command, [correlation_id: request.correlation_id] ++ opts)
@@ -310,7 +335,12 @@ defmodule RabbitMQStream.Connection.Lifecycle do
 
   defp connect(%Connection{} = conn) do
     with {:ok, socket} <- conn.transport.connect(conn.options) do
-      {:ok, %{conn | socket: socket, state: :connecting}}
+      conn =
+        conn
+        |> Map.put(:socket, socket)
+        |> RabbitMQStream.Connection.Handler.transition(:connecting)
+
+      {:ok, conn}
     end
   end
 
@@ -327,7 +357,9 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       GenServer.reply(client, {:error, {:closed, conn.close_reason}})
     end
 
-    conn = %{conn | request_tracker: %{}, connect_requests: [], socket: nil, state: :closed, close_reason: nil}
+    conn =
+      %{conn | request_tracker: %{}, connect_requests: [], socket: nil, close_reason: nil}
+      |> RabbitMQStream.Connection.Handler.transition(:closed)
 
     {:noreply, conn, :hibernate}
   end

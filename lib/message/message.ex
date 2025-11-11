@@ -192,7 +192,7 @@ defmodule RabbitMQStream.Message do
       command: :declare_producer,
       correlation_id: conn.correlation_sequence,
       data: %Types.DeclareProducerRequestData{
-        id: opts[:id],
+        producer_id: opts[:producer_id],
         producer_reference: opts[:producer_reference],
         stream_name: opts[:stream_name]
       }

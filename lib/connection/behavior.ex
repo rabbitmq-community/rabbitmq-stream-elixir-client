@@ -27,10 +27,18 @@ defmodule RabbitMQStream.Connection.Behavior do
   @callback declare_producer(GenServer.server(), stream_name :: String.t(), producer_reference :: String.t()) ::
               {:ok, producer_id :: integer()} | {:error, reason :: atom()}
 
+  @callback declare_producer(
+              GenServer.server(),
+              stream_name :: String.t(),
+              producer_reference :: String.t(),
+              producer_id :: integer()
+            ) ::
+              {:ok, producer_id :: integer()} | {:error, reason :: atom()}
+
   @callback delete_producer(GenServer.server(), producer_id :: integer()) ::
               :ok | {:error, reason :: atom()}
 
-  @callback query_producer_sequence(GenServer.server(), String.t(), String.t()) ::
+  @callback query_producer_sequence(GenServer.server(), stream_name :: String.t(), producer_reference :: String.t()) ::
               {:ok, sequence :: integer()} | {:error, reason :: atom()}
 
   @callback query_metadata(GenServer.server(), streams :: [String.t()]) ::
@@ -58,7 +66,12 @@ defmodule RabbitMQStream.Connection.Behavior do
   @callback unsubscribe(GenServer.server(), subscription_id :: non_neg_integer()) ::
               :ok | {:error, reason :: atom()}
 
-  @callback respond(GenServer.server(), request :: RabbitMQStream.Message.Request.t(), opts :: Keyword.t()) :: :ok
+  @callback respond(
+              GenServer.server(),
+              subscription_id :: non_neg_integer(),
+              request :: RabbitMQStream.Message.Request.t(),
+              opts :: Keyword.t()
+            ) :: :ok
 
   @callback credit(GenServer.server(), subscription_id :: non_neg_integer(), credit :: non_neg_integer()) :: :ok
 

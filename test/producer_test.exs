@@ -22,24 +22,24 @@ defmodule RabbitMQStreamTest.Producer do
   end
 
   setup do
-    {:ok, _conn} = SupervisedConnection.start_link(host: "localhost", vhost: "/")
+    {:ok, conn} = SupervisedConnection.start_link(host: "localhost", vhost: "/")
     :ok = SupervisedConnection.connect()
 
-    :ok
+    [conn: conn]
   end
 
   @stream "producer-test-01"
   @reference_name "producer-test-reference-01"
-  test "should declare itself and its stream" do
+  test "should declare itself and its stream", %{conn: conn} do
     assert {:ok, _} =
              SupervisorProducer.start_link(reference_name: @reference_name, stream_name: @stream)
 
-    SupervisedConnection.delete_stream(@stream)
+    RabbitMQStream.Connection.delete_stream(conn, @stream)
   end
 
   @stream "producer-test-02"
   @reference_name "producer-test-reference-02"
-  test "should query its sequence when declaring" do
+  test "should query its sequence when declaring", %{conn: conn} do
     {:ok, _} =
       SupervisorProducer.start_link(
         reference_name: @reference_name,
@@ -47,14 +47,15 @@ defmodule RabbitMQStreamTest.Producer do
       )
 
     assert %{sequence: 1} = :sys.get_state(Process.whereis(SupervisorProducer))
-    SupervisedConnection.delete_stream(@stream)
+    RabbitMQStream.Connection.delete_stream(conn, @stream)
   end
 
   @stream "producer-test-03"
   @reference_name "producer-test-reference-03"
-  test "should publish a message" do
+  test "should publish a message", %{conn: conn} do
     {:ok, _} =
       SupervisorProducer.start_link(
+        connection: conn,
         reference_name: @reference_name,
         stream_name: @stream
       )
@@ -73,6 +74,6 @@ defmodule RabbitMQStreamTest.Producer do
 
     assert %{sequence: ^sequence} = :sys.get_state(Process.whereis(SupervisorProducer))
 
-    SupervisedConnection.delete_stream(@stream)
+    RabbitMQStream.Connection.delete_stream(conn, @stream)
   end
 end

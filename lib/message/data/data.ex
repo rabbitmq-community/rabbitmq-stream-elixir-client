@@ -179,7 +179,7 @@ defmodule RabbitMQStream.Message.Data do
         {buffer, [{key, value} | acc]}
       end)
 
-    %Types.OpenResponseData{connection_properties: connection_properties}
+    %Types.OpenResponseData{connection_properties: Map.new(connection_properties)}
   end
 
   def decode(%Response{command: :route}, buffer) do
@@ -330,7 +330,7 @@ defmodule RabbitMQStream.Message.Data do
     stream_name = encode_string(data.stream_name)
 
     <<
-      data.id::unsigned-integer-size(8),
+      data.producer_id::unsigned-integer-size(8),
       producer_reference::binary,
       stream_name::binary
     >>

@@ -55,15 +55,15 @@ jobs:
 
       - uses: actions/checkout@v3
 
-      - uses: isbang/compose-action@v1.5.1
+      - uses: hoverkraft-tech/compose-action@2.0.1
         with:
           compose-file: "./services/docker-compose.yaml"
           services: "rabbitmq_stream_${{ matrix.version }}"
-      
-      - name: Wait RabbitMQ is Up
+
+      - name: Wait until RabbitMQ is Up
         run: sleep 10s
         shell: bash
-      
+
       - name: Create 'invoices' SuperStream
         run: docker exec rabbitmq_stream rabbitmq-streams add_super_stream invoices --partitions 3
 
@@ -79,4 +79,44 @@ jobs:
         run: mix compile
 
       - name: Run tests
-        run:  mix test --exclude test --include v${{ matrix.version }}
+        run: mix test --exclude test --include v${{ matrix.version }}
+  test-clustered:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["3_13"]
+        elixir: ["1.15", "1.16"]
+        otp: ["26"]
+    steps:
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - uses: actions/checkout@v3
+
+      - uses: hoverkraft-tech/compose-action@2.0.1
+        with:
+          compose-file: "./services/cluster/docker-compose.yaml"
+
+      - name: Wait util RabbitMQ is Up
+        run: sleep 20s
+        shell: bash
+
+      - name: Create 'invoices' SuperStream
+        run: docker exec rabbitmq1 rabbitmq-streams add_super_stream invoices --partitions 3
+
+      - name: Install Dependencies
+        run: |
+          mix local.rebar --force
+          mix local.hex --force
+          mix deps.unlock --all
+          mix deps.get
+          mix deps.compile
+
+      - name: Compile app
+        run: mix compile
+
+      - name: Run tests
+        run: mix test --exclude test --include v${{ matrix.version }}
