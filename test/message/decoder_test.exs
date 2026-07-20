@@ -15,4 +15,19 @@ defmodule RabbitMQStream.Message.DecoderTest do
     assert result.correlation_id == nil
     assert result.data == %Types.CreditResponseData{}
   end
+
+  test "parse_frames drops an undecodable frame and keeps valid ones" do
+    alias RabbitMQStream.Message.Buffer
+
+    # 0x00FF is not a known command -> Decoder.decode raises. It must be skipped.
+    bad = <<0x00FF::16, 1::16, 0x00>>
+    good = @credit_response
+
+    # Buffer stores frames reversed (prepended); pass [good, bad] so processing
+    # order is bad then good.
+    queue = Buffer.parse_frames([good, bad], :queue.new())
+    commands = :queue.to_list(queue)
+
+    assert [%Response{command: :credit}] = commands
+  end
 end
