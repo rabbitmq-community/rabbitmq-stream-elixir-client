@@ -1,6 +1,5 @@
 defmodule RabbitMQStream.Message do
   @moduledoc false
-  require Logger
 
   alias RabbitMQStream.Connection
 

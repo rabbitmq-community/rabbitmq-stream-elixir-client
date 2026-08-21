@@ -42,7 +42,7 @@ defmodule RabbitMQStream.MixProject do
     [
       {:ex_doc, "~> 0.31.1", only: :dev, runtime: false},
       {:jason, "~> 1.4.1", only: :test, runtime: false},
-      {:amqp, "~> 3.2", only: :test, runtime: false},
+      {:amqp, "~> 4.0", only: :test, runtime: false},
       {:amqp10_common, "~> 3.12", only: :test, runtime: false}
     ]
   end

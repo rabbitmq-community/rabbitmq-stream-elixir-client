@@ -183,7 +183,6 @@ defmodule RabbitMQStream.Consumer do
 
 
   """
-  require Logger
 
   defmacro __using__(opts) do
     defaults = Application.get_env(:rabbitmq_stream, :defaults, [])

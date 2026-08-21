@@ -69,7 +69,7 @@ defmodule RabbitMQStream.Message.Buffer do
         %__MODULE__{frames: frames, data: {size, partial}, commands: commands} = state
       ) do
     case data do
-      <<part::binary-size(size), rest::binary>> ->
+      <<part::binary-size(^size), rest::binary>> ->
         incoming_data(
           rest,
           %{state | frames: [<<partial::binary, part::binary>> | frames], data: nil}
