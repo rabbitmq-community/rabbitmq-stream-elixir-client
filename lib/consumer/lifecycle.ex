@@ -2,6 +2,7 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
   @moduledoc false
   alias RabbitMQStream.Message.{Request, Types.DeliverData}
   alias RabbitMQStream.Consumer.{FlowControl, OffsetTracking}
+  alias RabbitMQStream.Connection.Router
 
   use GenServer
   require Logger
@@ -41,6 +42,7 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
       |> Keyword.put(:offset_tracking, OffsetTracking.init(opts[:offset_tracking], opts))
       |> Keyword.put(:flow_control, FlowControl.init(opts[:flow_control], opts))
       |> Keyword.put(:credits, opts[:initial_credit])
+      |> Keyword.put(:seed_connection, opts[:connection])
 
     state = struct(RabbitMQStream.Consumer, opts)
 
@@ -49,12 +51,17 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
 
   @impl true
   def handle_continue({:init, opts}, state) do
+    # `before_start/2` runs first, unchanged from before this feature existed — it's
+    # commonly used to create the stream itself, so leader/replica resolution (which
+    # needs the stream to already exist) is deliberately done afterwards, not before.
     state =
       if function_exported?(state.consumer_module, :before_start, 2) do
         apply(state.consumer_module, :before_start, [opts, state])
       else
         state
       end
+
+    state = resolve_connection(state)
 
     last_offset =
       case RabbitMQStream.Connection.query_offset(state.connection, state.stream_name, state.offset_reference) do
@@ -228,6 +235,21 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
   @impl true
   def handle_call(:get_credits, _from, state) do
     {:reply, state.credits, state}
+  end
+
+  # Resolves the stream's leader/replica and swaps `state.connection` to it. Any
+  # resolution failure (stream not found yet, metadata unreachable, etc.) is
+  # non-fatal: it just keeps using whatever connection is already set, so a consumer
+  # that can't resolve leader routing behaves exactly as it did before this feature
+  # existed. The resolved connection is stored back into `state.connection` and used
+  # consistently for the rest of this process's life — required by `respond/3` in the
+  # `consumer_update` handler below, which must reply over the same connection the
+  # request arrived on.
+  defp resolve_connection(state) do
+    case Router.consumer_connection(state.seed_connection, state.stream_name) do
+      {:ok, connection} -> %{state | connection: connection}
+      {:error, _reason} -> state
+    end
   end
 
   @doc false

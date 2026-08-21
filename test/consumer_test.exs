@@ -157,6 +157,11 @@ defmodule RabbitMQStreamTest.Consumer do
     # below when `initial_offset: :next` is used.
     Consumer.get_credits()
 
+    # Single-node setup: the seed connection is already the stream's leader/only
+    # replica candidate, so the seed-reuse optimization in
+    # `RabbitMQStream.Connection.Router` should mean no extra connection was opened.
+    assert %{connection: conn, seed_connection: conn} = :sys.get_state(Process.whereis(Consumer))
+
     message1 = %{"message" => "Consumer Test: 1"}
     message2 = %{"message" => "Consumer Test: 2"}
     message3 = %{"message" => "Consumer Test: 3"}

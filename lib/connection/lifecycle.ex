@@ -71,6 +71,10 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     {:noreply, %{conn | connect_requests: [from | conn.connect_requests]}}
   end
 
+  def handle_call(:get_options, _from, %Connection{} = conn) do
+    {:reply, Keyword.put(conn.options, :transport, conn.transport), conn}
+  end
+
   # Replies with `:ok` if the connection is already closed. Not sure if this behavior is the best.
   def handle_call({:close, _reason, _code}, _from, %Connection{state: :closed} = conn) do
     {:reply, :ok, conn}

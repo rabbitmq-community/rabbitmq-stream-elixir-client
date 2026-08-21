@@ -226,6 +226,18 @@ defmodule RabbitMQStream.Connection do
   end
 
   @doc """
+  Returns this connection's raw configuration options (host, port, vhost, username,
+  password, frame_max, heartbeat, transport, etc). Works regardless of connection
+  state, since it's a local read rather than a protocol round-trip. Used internally
+  by leader routing to open a connection to another broker node with the same
+  vhost/credentials/transport as this one.
+  """
+  @spec get_options(GenServer.server()) :: connection_options()
+  def get_options(server) do
+    GenServer.call(server, :get_options)
+  end
+
+  @doc """
   Starts the connection process with the RabbitMQ Stream server, and waits
   until the authentication is complete.
 

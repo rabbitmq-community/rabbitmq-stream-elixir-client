@@ -68,7 +68,10 @@ defmodule RabbitMQStreamTest.Producer do
         stream_name: @stream
       )
 
-    assert %{sequence: 1} = :sys.get_state(Process.whereis(SupervisorProducer))
+    # Single-node setup: the seed connection is already the stream's leader, so the
+    # seed-reuse optimization in `RabbitMQStream.Connection.Router` should mean no
+    # extra connection was opened.
+    assert %{sequence: 1, connection: conn, seed_connection: conn} = :sys.get_state(Process.whereis(SupervisorProducer))
     SupervisedConnection.delete_stream(@stream)
   end
 
