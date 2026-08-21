@@ -278,6 +278,7 @@ defmodule RabbitMQStream.Consumer do
   defstruct [
     :offset_reference,
     :connection,
+    :seed_connection,
     :stream_name,
     :offset_tracking,
     :flow_control,
@@ -298,6 +299,7 @@ defmodule RabbitMQStream.Consumer do
   @type t :: %__MODULE__{
           offset_reference: String.t(),
           connection: GenServer.server(),
+          seed_connection: GenServer.server(),
           stream_name: String.t(),
           id: non_neg_integer() | nil,
           offset_tracking: [{RabbitMQStream.Consumer.OffsetTracking.t(), term()}],
