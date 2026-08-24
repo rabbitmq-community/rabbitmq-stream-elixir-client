@@ -126,6 +126,13 @@ defmodule RabbitMQStreamTest.Consumer do
         offset_tracking: [count: [store_after: 1]]
       )
 
+    # start_link/1 returns as soon as init/1 does, before the subscribe request
+    # (sent from handle_continue/2) is acknowledged by the broker. Since GenServer
+    # guarantees handle_continue completes before any queued call is answered, this
+    # call blocks until the subscription is active, avoiding a race with `publish`
+    # below when `initial_offset: :next` is used.
+    Consumer.get_credits()
+
     message1 = %{"message" => "Consumer Test: 1"}
     message2 = %{"message" => "Consumer Test: 2"}
     message3 = %{"message" => "Consumer Test: 3"}
