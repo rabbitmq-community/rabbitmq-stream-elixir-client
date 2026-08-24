@@ -84,6 +84,8 @@ defmodule RabbitMQStreamTest.SuperStream do
   end
 
   @tag :v3_13
+  @tag :v4_2
+  @tag :v4_3
   test "should create and delete a super_stream", %{conn: conn} do
     RabbitMQStream.Connection.delete_super_stream(conn, "transactions")
 
@@ -151,6 +153,8 @@ defmodule RabbitMQStreamTest.SuperStream do
   @tag :v3_11
   @tag :v3_12
   @tag :v3_13
+  @tag :v4_2
+  @tag :v4_3
   test "should create super streams", %{conn: conn} do
     {:ok, %{streams: streams}} =
       RabbitMQStream.Connection.query_metadata(conn, ["invoices-0", "invoices-1", "invoices-2"])
