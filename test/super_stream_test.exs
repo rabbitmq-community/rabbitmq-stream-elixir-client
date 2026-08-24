@@ -1,7 +1,6 @@
 defmodule RabbitMQStreamTest.SuperStream do
   use ExUnit.Case, async: false
   alias RabbitMQStream.OsirisChunk
-  require Logger
 
   defmodule SuperConsumer1 do
     use RabbitMQStream.SuperConsumer,

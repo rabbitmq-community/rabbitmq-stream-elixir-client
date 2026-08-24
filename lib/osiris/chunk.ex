@@ -116,12 +116,12 @@ defmodule RabbitMQStream.OsirisChunk do
   end
 
   defp decode_entry!(:chunk_user, <<0::1, length::unsigned-integer-size(31), rest::binary>>) do
-    <<data::binary-size(length), rest::binary>> = rest
+    <<data::binary-size(^length), rest::binary>> = rest
     {data, rest}
   end
 
   defp decode_entry!(:chunk_track_snapshot, <<0::1, length::unsigned-integer-size(31), rest::binary>>) do
-    <<data::binary-size(length), rest::binary>> = rest
+    <<data::binary-size(^length), rest::binary>> = rest
 
     stream =
       Stream.repeatedly(fn -> nil end)

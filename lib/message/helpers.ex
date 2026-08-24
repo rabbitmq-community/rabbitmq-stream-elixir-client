@@ -128,16 +128,16 @@ defmodule RabbitMQStream.Message.Helpers do
     @code_responses[atom]
   end
 
+  def encode_string(nil) do
+    <<-1::integer-size(16)>>
+  end
+
   def encode_string(value) when is_atom(value) do
     encode_string(Atom.to_string(value))
   end
 
   def encode_string(value) when is_integer(value) do
     encode_string(Integer.to_string(value))
-  end
-
-  def encode_string(nil) do
-    <<-1::integer-size(16)>>
   end
 
   def encode_string(str) do
