@@ -6,6 +6,8 @@ defmodule RabbitMQStreamTest.Connection do
   @moduletag :v3_11
   @moduletag :v3_12
   @moduletag :v3_13
+  @moduletag :v4_2
+  @moduletag :v4_3
 
   defmodule SupervisedConnection do
     use RabbitMQStream.Connection
@@ -21,6 +23,30 @@ defmodule RabbitMQStreamTest.Connection do
         cacertfile: "services/cert/ca_certificate.pem",
         verify: :verify_peer
       ]
+  end
+
+  # SupervisedConnection/SupervisedSSLConnection are registered under a fixed
+  # name, so the next test's start_link races the previous test process's
+  # implicit linked-process teardown unless we stop it synchronously first.
+  # on_exit runs in a separate process, so the pid found by whereis/1 can
+  # still die from that same link teardown before GenServer.stop/1 reaches
+  # it; treat that as already-stopped rather than letting it crash on_exit.
+  setup do
+    on_exit(fn ->
+      for mod <- [SupervisedConnection, SupervisedSSLConnection] do
+        case Process.whereis(mod) do
+          nil ->
+            :ok
+
+          pid ->
+            try do
+              GenServer.stop(pid)
+            catch
+              :exit, _ -> :ok
+            end
+        end
+      end
+    end)
   end
 
   test "should open and close the connection" do

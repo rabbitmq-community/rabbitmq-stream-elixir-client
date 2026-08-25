@@ -2,6 +2,8 @@ defmodule RabbitMQStreamTest.Consumer.FilterValue do
   use ExUnit.Case, async: false
 
   @moduletag :v3_13
+  @moduletag :v4_2
+  @moduletag :v4_3
 
   defmodule Conn1 do
     use RabbitMQStream.Connection

@@ -4,6 +4,8 @@ defmodule RabbitMQStreamTest.Interop do
   @moduletag :v3_11
   @moduletag :v3_12
   @moduletag :v3_13
+  @moduletag :v4_2
+  @moduletag :v4_3
 
   defmodule MyConnection do
     use RabbitMQStream.Connection

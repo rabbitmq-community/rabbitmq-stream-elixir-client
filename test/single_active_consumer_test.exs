@@ -5,6 +5,8 @@ defmodule RabbitMQStreamTest.Consumer.SingleActiveConsumer do
   @moduletag :v3_11
   @moduletag :v3_12
   @moduletag :v3_13
+  @moduletag :v4_2
+  @moduletag :v4_3
 
   defmodule Conn1 do
     use RabbitMQStream.Connection
@@ -110,6 +112,12 @@ defmodule RabbitMQStreamTest.Consumer.SingleActiveConsumer do
     Conn4.delete_stream("super-stream-test-01")
 
     {:ok, _} = Producer.start_link(stream_name: "super-stream-test-01")
+
+    # start_link/1 returns as soon as init/1 does, before before_start's
+    # create_stream (invoked from handle_continue/2) is acknowledged by the
+    # broker. Force synchronization so the stream exists before the
+    # consumers below try to subscribe to it.
+    :sys.get_state(Producer)
 
     {:ok, _} = Subs1.start_link(private: self())
     {:ok, _} = Subs2.start_link(private: self())
