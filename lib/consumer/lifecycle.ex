@@ -127,7 +127,7 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
       apply(state.consumer_module, :handle_chunk, [chunk, state])
     end
 
-    for message <- Enum.slice(chunk.data_entries, (state.last_offset - chunk.chunk_id)..chunk.num_entries) do
+    for message <- Enum.drop(chunk.data_entries, max(state.last_offset - chunk.chunk_id, 0)) do
       message =
         if function_exported?(state.consumer_module, :decode!, 1) do
           apply(state.consumer_module, :decode!, [message])
