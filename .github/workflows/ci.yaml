@@ -44,9 +44,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ["3_13", "3_12", "3_11"]
-        elixir: ["1.15", "1.16"]
-        otp: ["26"]
+        version: ["4_3", "4_2", "3_13", "3_12", "3_11"]
+        toolchain: ["1_15", "1_16", "1_20"]
+        include:
+          - toolchain: "1_15"
+            elixir: "1.15"
+            otp: "26"
+          - toolchain: "1_16"
+            elixir: "1.16"
+            otp: "26"
+          - toolchain: "1_20"
+            elixir: "1.20"
+            otp: "29"
     steps:
       - uses: erlef/setup-beam@v1
         with:

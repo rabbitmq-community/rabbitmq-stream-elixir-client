@@ -1,4 +1,38 @@
 services:
+  rabbitmq_stream_4_3:
+    container_name: rabbitmq_stream
+    image: rabbitmq:4.3-management
+    restart: always
+    hostname: rabbitmq_stream
+    volumes:
+      - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+      - ./cert:/etc/rabbitmq/cert
+    ports:
+      - 5552:5552
+      - 5551:5551
+      - 5672:5672
+      - 15672:15672
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+  rabbitmq_stream_4_2:
+    container_name: rabbitmq_stream
+    image: rabbitmq:4.2-management
+    restart: always
+    hostname: rabbitmq_stream
+    volumes:
+      - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+      - ./cert:/etc/rabbitmq/cert
+    ports:
+      - 5552:5552
+      - 5551:5551
+      - 5672:5672
+      - 15672:15672
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
   rabbitmq_stream_3_13:
     container_name: rabbitmq_stream
     image: rabbitmq:3.13-management
