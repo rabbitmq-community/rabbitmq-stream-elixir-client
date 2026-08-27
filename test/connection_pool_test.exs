@@ -6,6 +6,8 @@ defmodule RabbitMQStreamTest.ConnectionPool do
   @moduletag :v3_11
   @moduletag :v3_12
   @moduletag :v3_13
+  @moduletag :v4_2
+  @moduletag :v4_3
 
   @tcp_options [vhost: "/", username: "guest", password: "guest"]
   @ssl_options [

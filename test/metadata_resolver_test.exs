@@ -8,6 +8,8 @@ defmodule RabbitMQStreamTest.MetadataResolver do
   @moduletag :v3_11
   @moduletag :v3_12
   @moduletag :v3_13
+  @moduletag :v4_2
+  @moduletag :v4_3
 
   @leader %BrokerData{reference: 0, host: "node-a", port: 5552}
   @replica1 %BrokerData{reference: 1, host: "node-b", port: 5552}
