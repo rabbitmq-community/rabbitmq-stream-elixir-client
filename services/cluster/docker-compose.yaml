@@ -2,7 +2,7 @@
 # Same as 'services/proxied-cluster/docker-compose.yaml' but without the load balancer.
 services:
   rabbitmq1:
-    image: rabbitmq:3.13-management
+    image: rabbitmq:${RABBITMQ_VERSION:-3.13}-management
     hostname: rabbitmq1
     environment:
       - RABBITMQ_DEFAULT_USER=guest
@@ -19,7 +19,7 @@ services:
       - rabbitmq
 
   rabbitmq2:
-    image: rabbitmq:3.13-management
+    image: rabbitmq:${RABBITMQ_VERSION:-3.13}-management
     hostname: rabbitmq2
     depends_on:
       - rabbitmq1
@@ -36,7 +36,7 @@ services:
       - rabbitmq
 
   rabbitmq3:
-    image: rabbitmq:3.13-management
+    image: rabbitmq:${RABBITMQ_VERSION:-3.13}-management
     hostname: rabbitmq3
     depends_on:
       - rabbitmq1
