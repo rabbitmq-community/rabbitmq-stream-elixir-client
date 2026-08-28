@@ -28,7 +28,7 @@ jobs:
           otp-version: "26"
           elixir-version: "1.15"
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
       - name: Install Dependencies
         run: |
@@ -62,9 +62,9 @@ jobs:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
 
-      - uses: isbang/compose-action@v1.5.1
+      - uses: isbang/compose-action@v3.1.0
         with:
           compose-file: "./services/docker-compose.yaml"
           services: "rabbitmq_stream_${{ matrix.version }}"
