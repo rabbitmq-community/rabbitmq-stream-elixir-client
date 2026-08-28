@@ -43,6 +43,9 @@ To run the Clustered test, run:
     # or for proxied
     docker compose --project-directory services/proxied-cluster up -d
 
+    # Override the RabbitMQ version (defaults to 3.13)
+    RABBITMQ_VERSION=4.3 docker compose --project-directory services/cluster up -d
+
     # Run the tests
     mix test --exclude test --include v3_13_proxied_cluster
 
