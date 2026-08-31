@@ -15,6 +15,7 @@ services:
       - ../rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
       - ../cert:/etc/rabbitmq/cert
     entrypoint: /usr/local/bin/cluster-entrypoint.sh
+    restart: on-failure:5
     networks:
       - rabbitmq
 
@@ -32,6 +33,7 @@ services:
       - ../rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
       - ../cert:/etc/rabbitmq/cert
     entrypoint: /usr/local/bin/cluster-entrypoint.sh
+    restart: on-failure:5
     networks:
       - rabbitmq
 
@@ -49,6 +51,7 @@ services:
       - ../rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
       - ../cert:/etc/rabbitmq/cert
     entrypoint: /usr/local/bin/cluster-entrypoint.sh
+    restart: on-failure:5
     networks:
       - rabbitmq
 
