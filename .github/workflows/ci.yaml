@@ -123,6 +123,12 @@ jobs:
             done
           '
 
+      - name: Dump cluster logs on failure
+        if: failure()
+        run: |
+          docker compose --project-directory services/cluster ps
+          docker compose --project-directory services/cluster logs
+
       - name: Run cluster tests
         run: |
           docker run --network cluster_rabbitmq -v "${{ github.workspace }}:/home/rabbitmq-stream" elixir:${{ matrix.elixir }}-otp-${{ matrix.otp }} \
