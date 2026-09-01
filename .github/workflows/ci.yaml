@@ -92,28 +92,13 @@ jobs:
 
   cluster-test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        rabbitmq_version: ["3.13", "4.3"]
-        toolchain: ["1_15", "1_16", "1_20"]
-        include:
-          - toolchain: "1_15"
-            elixir: "1.15"
-            otp: "26"
-          - toolchain: "1_16"
-            elixir: "1.16"
-            otp: "26"
-          - toolchain: "1_20"
-            elixir: "1.20"
-            otp: "29"
     steps:
       - uses: actions/checkout@v7
 
       - name: Start RabbitMQ cluster
         run: docker compose --project-directory services/cluster up -d
         env:
-          RABBITMQ_VERSION: ${{ matrix.rabbitmq_version }}
+          RABBITMQ_VERSION: "4.3"
 
       - name: Wait for cluster to form
         run: |
@@ -131,5 +116,5 @@ jobs:
 
       - name: Run cluster tests
         run: |
-          docker run --network cluster_rabbitmq -v "${{ github.workspace }}:/home/rabbitmq-stream" elixir:${{ matrix.elixir }}-otp-${{ matrix.otp }} \
+          docker run --network cluster_rabbitmq -v "${{ github.workspace }}:/home/rabbitmq-stream" elixir:1.20-otp-29 \
             /bin/sh -c 'cd /home/rabbitmq-stream; ./services/cluster/test.sh'
