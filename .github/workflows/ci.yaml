@@ -89,3 +89,32 @@ jobs:
 
       - name: Run tests
         run:  mix test --exclude test --include v${{ matrix.version }}
+
+  cluster-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start RabbitMQ cluster
+        run: docker compose --project-directory services/cluster up -d
+        env:
+          RABBITMQ_VERSION: "4.3"
+
+      - name: Wait for cluster to form
+        run: |
+          timeout 90s bash -c '
+            until docker compose --project-directory services/cluster exec -T rabbitmq1 rabbitmqctl await_online_nodes 3; do
+              sleep 2
+            done
+          '
+
+      - name: Dump cluster logs on failure
+        if: failure()
+        run: |
+          docker compose --project-directory services/cluster ps
+          docker compose --project-directory services/cluster logs
+
+      - name: Run cluster tests
+        run: |
+          docker run --network cluster_rabbitmq -v "${{ github.workspace }}:/home/rabbitmq-stream" elixir:1.20-otp-29 \
+            /bin/sh -c 'cd /home/rabbitmq-stream; ./services/cluster/test.sh'

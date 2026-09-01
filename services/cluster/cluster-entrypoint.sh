@@ -6,6 +6,14 @@ set -e
 HOSTNAME=`env hostname`
 echo "Starting RabbitMQ Server For host: " $HOSTNAME
 
+# Write the cookie ourselves before rabbitmq-server starts, to avoid a known
+# intermittent race between the image generating it and Erlang reading it
+# back on boot.
+mkdir -p /var/lib/rabbitmq
+echo -n "$RABBITMQ_ERLANG_COOKIE" > /var/lib/rabbitmq/.erlang.cookie
+chown rabbitmq:rabbitmq /var/lib/rabbitmq/.erlang.cookie
+chmod 400 /var/lib/rabbitmq/.erlang.cookie
+
 if [ -z "$JOIN_CLUSTER_HOST" ]; then
     /usr/local/bin/docker-entrypoint.sh rabbitmq-server &
     sleep 5
