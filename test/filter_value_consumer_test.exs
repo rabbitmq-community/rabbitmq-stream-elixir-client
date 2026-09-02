@@ -97,6 +97,16 @@ defmodule RabbitMQStreamTest.Consumer.FilterValue do
     {:ok, _} = Subs2.start_link(private: self())
     {:ok, _} = Subs3.start_link(private: self())
 
+    # start_link/1 returns as soon as init/1 does, before the subscribe request (sent
+    # from handle_continue/2) is acknowledged by the broker. Since GenServer guarantees
+    # handle_continue completes before any queued call is answered, these calls block
+    # until each subscription is active, avoiding a race with `publish` below (with
+    # `initial_offset: :next`, anything published before a subscription is active is
+    # simply never delivered to it).
+    Subs1.get_credits()
+    Subs2.get_credits()
+    Subs3.get_credits()
+
     message1 = %{"key" => "Subs1", "value" => "1"}
     message2 = %{"key" => "Subs2", "value" => "2"}
     message3 = %{"value" => "4"}
