@@ -247,8 +247,15 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
   # request arrived on.
   defp resolve_connection(state) do
     case Router.consumer_connection(state.seed_connection, state.stream_name) do
-      {:ok, connection} -> %{state | connection: connection}
-      {:error, _reason} -> state
+      {:ok, connection} ->
+        %{state | connection: connection}
+
+      {:error, reason} ->
+        Logger.warning(
+          "#{state.consumer_module}: Failed to resolve leader/replica for stream #{state.stream_name}, falling back to the seed connection. Reason: #{inspect(reason)}"
+        )
+
+        state
     end
   end
 

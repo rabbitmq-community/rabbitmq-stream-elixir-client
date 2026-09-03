@@ -1,6 +1,7 @@
 defmodule RabbitMQStream.Producer.LifeCycle do
   @moduledoc false
   use GenServer
+  require Logger
 
   alias RabbitMQStream.Connection.Router
 
@@ -70,8 +71,15 @@ defmodule RabbitMQStream.Producer.LifeCycle do
   # leader routing behaves exactly as it did before this feature existed.
   defp resolve_connection(state) do
     case Router.producer_connection(state.seed_connection, state.stream_name) do
-      {:ok, connection} -> %{state | connection: connection}
-      {:error, _reason} -> state
+      {:ok, connection} ->
+        %{state | connection: connection}
+
+      {:error, reason} ->
+        Logger.warning(
+          "#{state.producer_module}: Failed to resolve leader for stream #{state.stream_name}, falling back to the seed connection. Reason: #{inspect(reason)}"
+        )
+
+        state
     end
   end
 end
