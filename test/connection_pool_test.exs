@@ -39,6 +39,30 @@ defmodule RabbitMQStreamTest.ConnectionPool do
     assert %RabbitMQStream.Connection{state: :open} = :sys.get_state(ssl_pid)
   end
 
+  test "opens a distinct connection when only ssl_opts differ, even with the same transport" do
+    assert {:ok, pid1} = Pool.get_or_start_connection(@tcp_options, "localhost", 5552)
+
+    # `ssl_opts` is inert for `transport: :tcp` -- this isolates "does the key differ"
+    # from "does the connection actually behave differently".
+    other_options = Keyword.put(@tcp_options, :ssl_opts, verify: :verify_none)
+    assert {:ok, pid2} = Pool.get_or_start_connection(other_options, "localhost", 5552)
+
+    assert pid1 != pid2
+    assert %RabbitMQStream.Connection{state: :open} = :sys.get_state(pid2)
+  end
+
+  test "attempts its own authentication instead of reusing another caller's session when only the password differs" do
+    assert {:ok, pid1} = Pool.get_or_start_connection(@tcp_options, "localhost", 5552)
+
+    wrong_password_options = Keyword.put(@tcp_options, :password, "definitely-wrong-password")
+    assert {:error, :authentication_failure} = Pool.get_or_start_connection(wrong_password_options, "localhost", 5552)
+
+    # The first caller's already-open connection must be untouched -- before this
+    # fix, the second call would have resolved to the same pool key and returned
+    # `{:ok, pid1}` without ever attempting its own authentication.
+    assert %RabbitMQStream.Connection{state: :open} = :sys.get_state(pid1)
+  end
+
   test "redials after the pooled connection process dies" do
     assert {:ok, pid1} = Pool.get_or_start_connection(@tcp_options, "localhost", 5552)
 
