@@ -38,6 +38,7 @@ defmodule RabbitMQStream.Producer.LifeCycle do
       end
 
     state = resolve_connection(state)
+    Router.monitor(state.seed_connection, state.connection)
 
     with {:ok, id} <-
            RabbitMQStream.Connection.declare_producer(state.connection, state.stream_name, state.reference_name),
@@ -57,7 +58,23 @@ defmodule RabbitMQStream.Producer.LifeCycle do
     {:noreply, %{state | sequence: state.sequence + 1}}
   end
 
+  # A routed (non-seed) connection dying means the publisher `id` declared on it is
+  # gone too — it was only ever valid for that specific connection's session. There's
+  # nothing to reconcile in place (that's reconnection, a separate concern), so stop
+  # cleanly and let the caller's own supervisor restart this producer from scratch,
+  # which re-resolves routing and re-declares the producer against a live connection.
   @impl GenServer
+  def handle_info({:DOWN, _ref, :process, pid, reason}, %{connection: pid} = state) do
+    Logger.error(
+      "#{state.producer_module}: Connection #{inspect(pid)} for stream #{state.stream_name} went down (#{inspect(reason)}). Stopping so the supervisor can restart it."
+    )
+
+    {:stop, {:connection_down, reason}, state}
+  end
+
+  @impl GenServer
+  def terminate({:connection_down, _reason}, _state), do: :ok
+
   def terminate(_reason, %{id: nil}), do: :ok
 
   def terminate(_reason, state) do
