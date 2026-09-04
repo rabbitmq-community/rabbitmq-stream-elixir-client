@@ -34,6 +34,16 @@ defmodule RabbitMQStream.Connection.Router do
   defp pick_replica(%{replicas: []} = resolved), do: resolved.leader
   defp pick_replica(%{replicas: replicas}), do: Enum.random(replicas)
 
+  # A routed connection comes from the shared Pool, not from the caller's own
+  # supervision tree, so nothing else notifies a Producer/Consumer if it dies (a
+  # pooled `Connection` restarting under `DynamicSupervisor` gets a fresh pid,
+  # and the old one silently no-ops forever against `GenServer.cast`). Monitor it
+  # so the caller can detect that and stop cleanly instead. Not needed for the
+  # seed connection: that one lives in the caller's own supervision tree already.
+  @spec monitor(seed :: GenServer.server(), connection :: GenServer.server()) :: reference() | nil
+  def monitor(seed, connection) when connection != seed, do: Process.monitor(connection)
+  def monitor(_seed, _connection), do: nil
+
   # Avoids opening a redundant pooled connection when the seed itself already is the
   # resolved broker (the common single-node case).
   defp route(seed, %{host: host, port: port}) do
