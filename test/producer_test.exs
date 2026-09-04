@@ -23,6 +23,18 @@ defmodule RabbitMQStreamTest.Producer do
     end
   end
 
+  defmodule CustomRoutingProducer do
+    use RabbitMQStream.Producer,
+      connection: RabbitMQStreamTest.Producer.SupervisedConnection
+
+    @impl true
+    def before_start(opts, state) do
+      RabbitMQStream.Connection.create_stream(state.connection, state.stream_name)
+
+      %{state | connection: Keyword.fetch!(opts, :custom_connection)}
+    end
+  end
+
   # SupervisedConnection is registered under a fixed name, so the next
   # test's start_link races the previous test process's implicit
   # linked-process teardown unless we stop it synchronously first. on_exit
@@ -72,6 +84,24 @@ defmodule RabbitMQStreamTest.Producer do
     # seed-reuse optimization in `RabbitMQStream.Connection.Router` should mean no
     # extra connection was opened.
     assert %{sequence: 1, connection: conn, seed_connection: conn} = :sys.get_state(Process.whereis(SupervisorProducer))
+    SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "producer-test-before-start-override"
+  @reference_name "producer-test-reference-before-start-override"
+  test "before_start/2's connection choice is not overridden by leader resolution" do
+    {:ok, custom_connection} = RabbitMQStream.Connection.start_link(host: "localhost", vhost: "/")
+    :ok = RabbitMQStream.Connection.connect(custom_connection)
+
+    assert {:ok, _} =
+             CustomRoutingProducer.start_link(
+               reference_name: @reference_name,
+               stream_name: @stream,
+               custom_connection: custom_connection
+             )
+
+    assert %{connection: ^custom_connection} = :sys.get_state(Process.whereis(CustomRoutingProducer))
+
     SupervisedConnection.delete_stream(@stream)
   end
 
