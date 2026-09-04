@@ -18,6 +18,8 @@ defmodule RabbitMQStream.Connection.Pool do
           port :: non_neg_integer(),
           vhost :: String.t(),
           username :: String.t(),
+          password :: String.t(),
+          ssl_opts :: Keyword.t() | nil,
           transport :: atom() | module()
         }
 
@@ -95,6 +97,8 @@ defmodule RabbitMQStream.Connection.Pool do
       port,
       Keyword.get(base_options, :vhost, "/"),
       Keyword.get(base_options, :username, "guest"),
+      Keyword.get(base_options, :password, "guest"),
+      Keyword.get(base_options, :ssl_opts),
       Keyword.get(base_options, :transport, :tcp)
     }
   end
