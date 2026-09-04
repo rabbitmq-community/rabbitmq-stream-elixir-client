@@ -35,6 +35,7 @@ defmodule RabbitMQStream.Connection do
   * `vhost` - The virtual host to use. Defaults to `/`.
   * `frame_max` - The maximum frame size in Bytes. Defaults to `1_048_576`.
   * `heartbeat` - The heartbeat interval in seconds. Defaults to `60`.
+  * `connect_timeout` - The TCP/TLS connect timeout in milliseconds. Defaults to `10_000`.
   * `lazy` - If `true`, the connection won't starting until explicitly calling `connect/1`. Defaults to `false`.
 
 
@@ -245,7 +246,16 @@ defmodule RabbitMQStream.Connection do
   this call waits for it to complete before return the result.
   """
   def connect(server) do
-    GenServer.call(server, {:connect})
+    # The socket connect itself is bounded by `:connect_timeout` (default 10s), so this
+    # call is always guaranteed to receive a reply -- success or a connect/auth error --
+    # within that bound. Using `:infinity` here means the caller waits for that actual,
+    # bounded outcome rather than racing it with an independent guess at how long the
+    # underlying connect might take: an unreachable/unresponsive address used to hang
+    # this call for however long the OS's own TCP retry timeout took (60s+), and a
+    # finite call timeout here would just misreport that ongoing work as `:noproc`
+    # (see `RabbitMQStream.Connection.Pool.connect/1`, which now only treats a genuine
+    # dead-process exit that way).
+    GenServer.call(server, {:connect}, :infinity)
   end
 
   @doc """
@@ -522,6 +532,7 @@ defmodule RabbitMQStream.Connection do
           | {:vhost, String.t()}
           | {:frame_max, non_neg_integer()}
           | {:heartbeat, non_neg_integer()}
+          | {:connect_timeout, non_neg_integer()}
           | {:lazy, boolean()}
   @type t() :: %RabbitMQStream.Connection{
           options: connection_options,

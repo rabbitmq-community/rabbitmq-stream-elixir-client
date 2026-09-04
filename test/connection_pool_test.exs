@@ -79,4 +79,19 @@ defmodule RabbitMQStreamTest.ConnectionPool do
   # Note: true multi-node reuse (two different real broker nodes, each getting its own
   # pooled connection) isn't meaningfully testable with the single-node compose used
   # here — that's covered by the cluster integration test in clustered_test.exs instead.
+
+  test "fails fast against an unreachable address instead of hanging" do
+    # 192.0.2.0/24 is IANA's reserved TEST-NET-1 block (RFC 5737) -- never assigned or
+    # routed anywhere, so this reliably simulates a dropped-SYN/unreachable leader
+    # address without depending on any specific network's firewall behavior.
+    opts = Keyword.put(@tcp_options, :connect_timeout, 2_000)
+
+    start = System.monotonic_time(:millisecond)
+    result = Pool.get_or_start_connection(opts, "192.0.2.1", 5552)
+    elapsed = System.monotonic_time(:millisecond) - start
+
+    assert {:error, _reason} = result
+    refute match?({:error, :noproc}, result)
+    assert elapsed < 10_000
+  end
 end

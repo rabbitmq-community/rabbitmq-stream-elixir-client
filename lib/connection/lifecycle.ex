@@ -25,6 +25,7 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       |> Keyword.put_new(:password, "guest")
       |> Keyword.put_new(:frame_max, 1_048_576)
       |> Keyword.put_new(:heartbeat, 60)
+      |> Keyword.put_new(:connect_timeout, 10_000)
       |> Keyword.put_new(:transport, :tcp)
 
     transport =

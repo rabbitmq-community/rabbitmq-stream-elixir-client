@@ -88,7 +88,13 @@ defmodule RabbitMQStream.Connection.Pool do
       error -> error
     end
   catch
-    :exit, _ -> {:error, :noproc}
+    # Only a genuinely dead process (the stale-registration race above) is worth
+    # retrying against a fresh lookup. Anything else -- e.g. the connection crashing
+    # mid-connect for an unrelated reason -- is a real failure and must surface
+    # immediately rather than being silently retried up to 10 times against a pid
+    # that was never actually stale.
+    :exit, {:noproc, _} -> {:error, :noproc}
+    :exit, reason -> {:error, reason}
   end
 
   defp build_key(base_options, host, port) do
