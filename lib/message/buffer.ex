@@ -105,7 +105,19 @@ defmodule RabbitMQStream.Message.Buffer do
     frames
     |> Enum.reverse()
     |> Enum.reduce(queue, fn frame, acc ->
-      :queue.in(Decoder.decode(frame), acc)
+      try do
+        :queue.in(Decoder.decode(frame), acc)
+      rescue
+        error ->
+          require Logger
+
+          Logger.warning("RabbitMQStream: dropping undecodable frame",
+            error: inspect(error),
+            frame: inspect(frame, limit: 64)
+          )
+
+          acc
+      end
     end)
   end
 end
