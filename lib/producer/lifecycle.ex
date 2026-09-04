@@ -37,7 +37,16 @@ defmodule RabbitMQStream.Producer.LifeCycle do
         state
       end
 
-    state = resolve_connection(state)
+    connection =
+      Router.resolve_connection(
+        :producer,
+        state.producer_module,
+        state.seed_connection,
+        state.connection,
+        state.stream_name
+      )
+
+    state = %{state | connection: connection}
     Router.monitor(state.seed_connection, state.connection)
 
     with {:ok, id} <-
@@ -80,23 +89,5 @@ defmodule RabbitMQStream.Producer.LifeCycle do
   def terminate(_reason, state) do
     RabbitMQStream.Connection.delete_producer(state.connection, state.id)
     :ok
-  end
-
-  # Resolves the stream's leader and swaps `state.connection` to it. Any resolution
-  # failure (stream not found yet, metadata unreachable, etc.) is non-fatal: it just
-  # keeps using whatever connection is already set, so a producer that can't resolve
-  # leader routing behaves exactly as it did before this feature existed.
-  defp resolve_connection(state) do
-    case Router.producer_connection(state.seed_connection, state.stream_name) do
-      {:ok, connection} ->
-        %{state | connection: connection}
-
-      {:error, reason} ->
-        Logger.warning(
-          "#{state.producer_module}: Failed to resolve leader for stream #{state.stream_name}, falling back to the seed connection. Reason: #{inspect(reason)}"
-        )
-
-        state
-    end
   end
 end

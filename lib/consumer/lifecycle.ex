@@ -61,7 +61,20 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
         state
       end
 
-    state = resolve_connection(state)
+    # The resolved connection is stored back into `state.connection` and used
+    # consistently for the rest of this process's life — required by `respond/3` in
+    # the `consumer_update` handler below, which must reply over the same connection
+    # the request arrived on.
+    connection =
+      Router.resolve_connection(
+        :consumer,
+        state.consumer_module,
+        state.seed_connection,
+        state.connection,
+        state.stream_name
+      )
+
+    state = %{state | connection: connection}
     Router.monitor(state.seed_connection, state.connection)
 
     last_offset =
@@ -252,28 +265,6 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
   @impl true
   def handle_call(:get_credits, _from, state) do
     {:reply, state.credits, state}
-  end
-
-  # Resolves the stream's leader/replica and swaps `state.connection` to it. Any
-  # resolution failure (stream not found yet, metadata unreachable, etc.) is
-  # non-fatal: it just keeps using whatever connection is already set, so a consumer
-  # that can't resolve leader routing behaves exactly as it did before this feature
-  # existed. The resolved connection is stored back into `state.connection` and used
-  # consistently for the rest of this process's life — required by `respond/3` in the
-  # `consumer_update` handler below, which must reply over the same connection the
-  # request arrived on.
-  defp resolve_connection(state) do
-    case Router.consumer_connection(state.seed_connection, state.stream_name) do
-      {:ok, connection} ->
-        %{state | connection: connection}
-
-      {:error, reason} ->
-        Logger.warning(
-          "#{state.consumer_module}: Failed to resolve leader/replica for stream #{state.stream_name}, falling back to the seed connection. Reason: #{inspect(reason)}"
-        )
-
-        state
-    end
   end
 
   @doc false
