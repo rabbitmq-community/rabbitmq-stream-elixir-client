@@ -2,6 +2,7 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
   @moduledoc false
   alias RabbitMQStream.Message.{Request, Types.DeliverData}
   alias RabbitMQStream.Consumer.{FlowControl, OffsetTracking}
+  alias RabbitMQStream.Connection.Router
 
   use GenServer
   require Logger
@@ -41,6 +42,7 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
       |> Keyword.put(:offset_tracking, OffsetTracking.init(opts[:offset_tracking], opts))
       |> Keyword.put(:flow_control, FlowControl.init(opts[:flow_control], opts))
       |> Keyword.put(:credits, opts[:initial_credit])
+      |> Keyword.put(:seed_connection, opts[:connection])
 
     state = struct(RabbitMQStream.Consumer, opts)
 
@@ -49,12 +51,31 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
 
   @impl true
   def handle_continue({:init, opts}, state) do
+    # `before_start/2` runs first, unchanged from before this feature existed — it's
+    # commonly used to create the stream itself, so leader/replica resolution (which
+    # needs the stream to already exist) is deliberately done afterwards, not before.
     state =
       if function_exported?(state.consumer_module, :before_start, 2) do
         apply(state.consumer_module, :before_start, [opts, state])
       else
         state
       end
+
+    # The resolved connection is stored back into `state.connection` and used
+    # consistently for the rest of this process's life — required by `respond/3` in
+    # the `consumer_update` handler below, which must reply over the same connection
+    # the request arrived on.
+    connection =
+      Router.resolve_connection(
+        :consumer,
+        state.consumer_module,
+        state.seed_connection,
+        state.connection,
+        state.stream_name
+      )
+
+    state = %{state | connection: connection}
+    Router.monitor(state.seed_connection, state.connection)
 
     last_offset =
       case RabbitMQStream.Connection.query_offset(state.connection, state.stream_name, state.offset_reference) do
@@ -99,6 +120,8 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
   end
 
   @impl true
+  def terminate({:connection_down, _reason}, _state), do: :ok
+
   def terminate(_reason, %{id: nil}), do: :ok
 
   def terminate(_reason, state) do
@@ -119,6 +142,20 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
 
     RabbitMQStream.Connection.unsubscribe(state.connection, state.id)
     :ok
+  end
+
+  # A routed (non-seed) connection dying means the subscription `id` registered on it
+  # is gone too — it was only ever valid for that specific connection's session. There's
+  # nothing to reconcile in place (that's reconnection, a separate concern), so stop
+  # cleanly and let the caller's own supervisor restart this consumer from scratch,
+  # which re-resolves routing and re-subscribes against a live connection.
+  @impl true
+  def handle_info({:DOWN, _ref, :process, pid, reason}, %{connection: pid} = state) do
+    Logger.error(
+      "#{state.consumer_module}: Connection #{inspect(pid)} for stream #{state.stream_name} went down (#{inspect(reason)}). Stopping so the supervisor can restart it."
+    )
+
+    {:stop, {:connection_down, reason}, state}
   end
 
   @impl true

@@ -25,6 +25,7 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       |> Keyword.put_new(:password, "guest")
       |> Keyword.put_new(:frame_max, 1_048_576)
       |> Keyword.put_new(:heartbeat, 60)
+      |> Keyword.put_new(:connect_timeout, 10_000)
       |> Keyword.put_new(:transport, :tcp)
 
     transport =
@@ -69,6 +70,10 @@ defmodule RabbitMQStream.Connection.Lifecycle do
 
   def handle_call({:connect}, from, %Connection{} = conn) do
     {:noreply, %{conn | connect_requests: [from | conn.connect_requests]}}
+  end
+
+  def handle_call(:get_options, _from, %Connection{} = conn) do
+    {:reply, Keyword.put(conn.options, :transport, conn.transport), conn}
   end
 
   # Replies with `:ok` if the connection is already closed. Not sure if this behavior is the best.
