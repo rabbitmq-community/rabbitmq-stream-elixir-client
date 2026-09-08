@@ -239,6 +239,20 @@ defmodule RabbitMQStream.Connection do
   end
 
   @doc """
+  Returns the `connection_properties` the broker sent back in its `Open` response for
+  this connection, as a map (e.g. `"advertised_host"`, `"advertised_port"`). Unlike
+  `get_options/1`, these are the broker's own view of this connection's address, not
+  what the caller dialed -- used by leader routing to compare against a stream leader's
+  advertised address from `query_metadata/2` without assuming the dialed address and
+  the broker-advertised address are the same string. Empty until the connection has
+  finished opening.
+  """
+  @spec get_connection_properties(GenServer.server()) :: %{String.t() => String.t()}
+  def get_connection_properties(server) do
+    GenServer.call(server, :get_connection_properties)
+  end
+
+  @doc """
   Starts the connection process with the RabbitMQ Stream server, and waits
   until the authentication is complete.
 

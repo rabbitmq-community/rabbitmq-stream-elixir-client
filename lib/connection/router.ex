@@ -83,11 +83,31 @@ defmodule RabbitMQStream.Connection.Router do
   def monitor(_seed, _connection), do: nil
 
   # Avoids opening a redundant pooled connection when the seed itself already is the
-  # resolved broker (the common single-node case).
+  # resolved broker (the common single-node case). Compares against the *broker's own*
+  # advertised address for this connection (from the `Open` response's
+  # `connection_properties`), not the address the caller dialed -- those two are only
+  # the same string by coincidence (e.g. dialing "localhost" against a broker that
+  # advertises its container hostname). Both `advertised_host`/`advertised_port` and a
+  # stream leader's host/port in `query_metadata/2` are broker-reported, so comparing
+  # those two against each other is apples-to-apples regardless of what the client
+  # happened to dial. Falls back to the dialed address only if the broker didn't report
+  # its own advertised address at all (pre-3.13, or `stream.advertised_host` unset in a
+  # way the broker doesn't echo back -- in practice this shouldn't happen on any broker
+  # version this library supports, but avoids a hard failure if it ever does).
   defp route(seed, %{host: host, port: port}) do
     base_options = Connection.get_options(seed)
+    connection_properties = Connection.get_connection_properties(seed)
 
-    if base_options[:host] == host and base_options[:port] == port do
+    {seed_host, seed_port} =
+      case connection_properties do
+        %{"advertised_host" => advertised_host, "advertised_port" => advertised_port} ->
+          {advertised_host, String.to_integer(advertised_port)}
+
+        _ ->
+          {base_options[:host], base_options[:port]}
+      end
+
+    if seed_host == host and seed_port == port do
       {:ok, seed}
     else
       Pool.get_or_start_connection(base_options, host, port)

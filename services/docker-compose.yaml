@@ -8,7 +8,6 @@ services:
       - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
       - ./cert:/etc/rabbitmq/cert
-      - ./conf.d/advertised_host.conf:/etc/rabbitmq/conf.d/advertised_host.conf
     ports:
       - 5552:5552
       - 5551:5551
@@ -26,7 +25,6 @@ services:
       - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
       - ./cert:/etc/rabbitmq/cert
-      - ./conf.d/advertised_host.conf:/etc/rabbitmq/conf.d/advertised_host.conf
     ports:
       - 5552:5552
       - 5551:5551
@@ -44,7 +42,6 @@ services:
       - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
       - ./cert:/etc/rabbitmq/cert
-      - ./conf.d/advertised_host.conf:/etc/rabbitmq/conf.d/advertised_host.conf
     ports:
       - 5552:5552
       - 5551:5551
@@ -62,7 +59,6 @@ services:
       - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
       - ./cert:/etc/rabbitmq/cert
-      - ./conf.d/advertised_host.conf:/etc/rabbitmq/conf.d/advertised_host.conf
     ports:
       - 5552:5552
       - 5551:5551
@@ -80,7 +76,6 @@ services:
       - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
       - ./cert:/etc/rabbitmq/cert
-      - ./conf.d/advertised_host.conf:/etc/rabbitmq/conf.d/advertised_host.conf
     ports:
       - 5552:5552
       - 5551:5551
