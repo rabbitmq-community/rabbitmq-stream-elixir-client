@@ -47,7 +47,7 @@ defmodule RabbitMQStream.Producer.LifeCycle do
       )
 
     state = %{state | connection: connection}
-    Router.monitor(state.seed_connection, state.connection)
+    Router.monitor(state.connection)
 
     with {:ok, id} <-
            RabbitMQStream.Connection.declare_producer(state.connection, state.stream_name, state.reference_name),

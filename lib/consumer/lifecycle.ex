@@ -75,7 +75,7 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
       )
 
     state = %{state | connection: connection}
-    Router.monitor(state.seed_connection, state.connection)
+    Router.monitor(state.connection)
 
     last_offset =
       case RabbitMQStream.Connection.query_offset(state.connection, state.stream_name, state.offset_reference) do

@@ -72,15 +72,16 @@ defmodule RabbitMQStream.Connection.Router do
   defp resolve_label(:producer), do: "leader"
   defp resolve_label(:consumer), do: "leader/replica"
 
-  # A routed connection comes from the shared Pool, not from the caller's own
-  # supervision tree, so nothing else notifies a Producer/Consumer if it dies (a
-  # pooled `Connection` restarting under `DynamicSupervisor` gets a fresh pid,
-  # and the old one silently no-ops forever against `GenServer.cast`). Monitor it
-  # so the caller can detect that and stop cleanly instead. Not needed for the
-  # seed connection: that one lives in the caller's own supervision tree already.
-  @spec monitor(seed :: GenServer.server(), connection :: GenServer.server()) :: reference() | nil
-  def monitor(seed, connection) when connection != seed, do: Process.monitor(connection)
-  def monitor(_seed, _connection), do: nil
+  # A routed (pooled) connection restarting under `DynamicSupervisor` gets a fresh pid,
+  # and the old one silently no-ops forever against `GenServer.cast` -- nothing else
+  # notifies a Producer/Consumer if it dies. The seed connection isn't guaranteed to be
+  # any safer: it's just whatever `GenServer.server()` the caller passed in, and this
+  # module has no way to verify it's actually linked into a supervision tree that would
+  # notice its death. So monitor unconditionally, and let the caller stop cleanly on
+  # either kind of connection dying instead of silently no-op'ing against a dead/stale
+  # session.
+  @spec monitor(connection :: GenServer.server()) :: reference()
+  def monitor(connection), do: Process.monitor(connection)
 
   # Avoids opening a redundant pooled connection when the seed itself already is the
   # resolved broker (the common single-node case). Compares against the *broker's own*

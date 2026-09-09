@@ -102,8 +102,8 @@ defmodule RabbitMQStream.Connection do
         GenServer.stop(__MODULE__, reason, timeout)
       end
 
-      def connect() do
-        RabbitMQStream.Connection.connect(__MODULE__)
+      def connect(timeout \\ :infinity) do
+        RabbitMQStream.Connection.connect(__MODULE__, timeout)
       end
 
       def close(reason \\ "", code \\ 0x00) do
@@ -258,18 +258,16 @@ defmodule RabbitMQStream.Connection do
 
   If the authentication process has already been started by other process,
   this call waits for it to complete before return the result.
+
+  `timeout` bounds this call itself and defaults to `:infinity`. The connect/auth
+  work it's waiting on is already bounded by the `:connect_timeout` connection option
+  (default 10s) regardless of what's passed here, so the default just means "wait for
+  that actual, bounded outcome" rather than imposing a second, independent guess at how
+  long it might take. Pass a shorter `timeout` only if the caller wants to bail out
+  before `:connect_timeout` elapses -- e.g. it has its own tighter deadline.
   """
-  def connect(server) do
-    # The socket connect itself is bounded by `:connect_timeout` (default 10s), so this
-    # call is always guaranteed to receive a reply -- success or a connect/auth error --
-    # within that bound. Using `:infinity` here means the caller waits for that actual,
-    # bounded outcome rather than racing it with an independent guess at how long the
-    # underlying connect might take: an unreachable/unresponsive address used to hang
-    # this call for however long the OS's own TCP retry timeout took (60s+), and a
-    # finite call timeout here would just misreport that ongoing work as `:noproc`
-    # (see `RabbitMQStream.Connection.Pool.connect/1`, which now only treats a genuine
-    # dead-process exit that way).
-    GenServer.call(server, {:connect}, :infinity)
+  def connect(server, timeout \\ :infinity) do
+    GenServer.call(server, {:connect}, timeout)
   end
 
   @doc """
