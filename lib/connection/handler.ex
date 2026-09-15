@@ -45,8 +45,19 @@ defmodule RabbitMQStream.Connection.Handler do
     conn
   end
 
-  def handle_message(%Connection{} = conn, %Request{command: command})
-      when command in [:publish_confirm, :publish_error] do
+  def handle_message(%Connection{} = conn, %Request{command: :publish_confirm} = request) do
+    if pid = Map.get(conn.producers, request.data.producer_id) do
+      send(pid, {:publish_confirm, request.data.publishing_ids})
+    end
+
+    conn
+  end
+
+  def handle_message(%Connection{} = conn, %Request{command: :publish_error} = request) do
+    if pid = Map.get(conn.producers, request.data.producer_id) do
+      send(pid, {:publish_error, request.data.errors})
+    end
+
     conn
   end
 
@@ -213,13 +224,19 @@ defmodule RabbitMQStream.Connection.Handler do
   end
 
   def handle_message(%Connection{} = conn, %Response{command: :declare_producer} = response) do
-    {{pid, id}, conn} = Helpers.pop_tracker(conn, :declare_producer, response.correlation_id)
+    {{from, id}, conn} = Helpers.pop_tracker(conn, :declare_producer, response.correlation_id)
 
-    if pid != nil do
-      GenServer.reply(pid, {:ok, id})
-    end
+    # `from` is the `GenServer.call/2` reply-tuple (`{pid, tag}`), valid for
+    # `GenServer.reply/2` but not as a raw `send/2` destination -- unwrap the
+    # actual producer pid before storing it for `:publish_confirm`/`:publish_error`
+    # routing.
+    producer_pid =
+      if from != nil do
+        GenServer.reply(from, {:ok, id})
+        elem(from, 0)
+      end
 
-    conn
+    %{conn | producers: Map.put(conn.producers, id, producer_pid)}
   end
 
   def handle_message(%Connection{} = conn, %Response{command: :query_producer_sequence} = response) do
@@ -252,6 +269,16 @@ defmodule RabbitMQStream.Connection.Handler do
     end
 
     %{conn | subscriptions: Map.drop(conn.subscriptions, [subscription_id])}
+  end
+
+  def handle_message(%Connection{} = conn, %Response{command: :delete_producer} = response) do
+    {{pid, producer_id}, conn} = Helpers.pop_tracker(conn, :delete_producer, response.correlation_id)
+
+    if pid != nil do
+      GenServer.reply(pid, :ok)
+    end
+
+    %{conn | producers: Map.drop(conn.producers, [producer_id])}
   end
 
   # If the server has a version 3.12 or higher, this is the 'terminating' response.
@@ -287,7 +314,7 @@ defmodule RabbitMQStream.Connection.Handler do
   end
 
   def handle_message(%Connection{} = conn, %Response{command: command} = response)
-      when command in [:create_stream, :delete_stream, :delete_producer, :create_super_stream, :delete_super_stream] do
+      when command in [:create_stream, :delete_stream, :create_super_stream, :delete_super_stream] do
     {{pid, _data}, conn} = Helpers.pop_tracker(conn, command, response.correlation_id)
 
     if pid != nil do

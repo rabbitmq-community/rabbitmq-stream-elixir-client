@@ -559,6 +559,7 @@ defmodule RabbitMQStream.Connection do
           connect_requests: [pid()],
           request_tracker: %{{atom(), integer()} => {pid(), any()}},
           subscriptions: %{non_neg_integer() => pid()},
+          producers: %{non_neg_integer() => pid()},
           commands: %{
             RabbitMQStream.Message.Helpers.command() => %{min: non_neg_integer(), max: non_neg_integer()}
           },
@@ -579,6 +580,7 @@ defmodule RabbitMQStream.Connection do
     producer_sequence: 1,
     subscriber_sequence: 1,
     subscriptions: %{},
+    producers: %{},
     state: :closed,
     peer_properties: [],
     connection_properties: [],

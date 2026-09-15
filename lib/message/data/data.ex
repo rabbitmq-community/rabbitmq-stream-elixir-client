@@ -30,7 +30,7 @@ defmodule RabbitMQStream.Message.Data do
     %Types.PublishConfirmData{producer_id: producer_id, publishing_ids: publishing_ids}
   end
 
-  def decode(%Response{command: :publish_error}, buffer) do
+  def decode(%Request{command: :publish_error}, buffer) do
     <<producer_id::unsigned-integer-size(8), buffer::binary>> = buffer
 
     {"", errors} =

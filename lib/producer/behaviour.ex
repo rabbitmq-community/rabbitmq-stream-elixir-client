@@ -49,5 +49,23 @@ defmodule RabbitMQStream.Producer.Behaviour do
   """
   @callback filter_value(message :: term()) :: String.t() | nil
 
-  @optional_callbacks [before_start: 2, filter_value: 1]
+  @doc """
+  Optional callback invoked when the server confirms that a batch of previously
+  published messages has been durably written to the stream.
+
+  Receives the `publishing_id`s (as set at publish time) of every message confirmed
+  in this batch.
+  """
+  @callback handle_confirm(publishing_ids :: [non_neg_integer()]) :: term()
+
+  @doc """
+  Optional callback invoked when the server reports that a batch of previously
+  published messages failed to be written to the stream.
+
+  Receives the list of `%RabbitMQStream.Message.Types.PublishErrorData.Error{}`
+  structs (`publishing_id` and `code`) for this batch.
+  """
+  @callback handle_publish_error(errors :: [RabbitMQStream.Message.Types.PublishErrorData.Error.t()]) :: term()
+
+  @optional_callbacks [before_start: 2, filter_value: 1, handle_confirm: 1, handle_publish_error: 1]
 end
