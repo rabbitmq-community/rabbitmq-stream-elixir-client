@@ -110,6 +110,10 @@ defmodule RabbitMQStreamTest.Consumer.SingleActiveConsumer do
     :ok = Conn4.connect()
 
     Conn4.delete_stream("super-stream-test-01")
+    # We ensure the stream exists before consuming, rather than relying on the timing
+    # of `Producer`'s `before_start`-driven `create_stream/2` versus the consumers'
+    # subscribe calls below.
+    :ok = Conn4.create_stream("super-stream-test-01")
 
     {:ok, _} = Producer.start_link(stream_name: "super-stream-test-01")
 

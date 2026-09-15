@@ -4,6 +4,10 @@ defmodule RabbitMQStream.Connection.Behavior do
   """
   alias RabbitMQStream.Message.Types.{PartitionsQueryResponseData, StreamStatsResponseData, QueryMetadataResponseData}
 
+  @callback get_options(GenServer.server()) :: RabbitMQStream.Connection.connection_options()
+
+  @callback get_connection_properties(GenServer.server()) :: %{String.t() => String.t()}
+
   @callback connect(GenServer.server()) :: :ok | {:error, reason :: atom()}
 
   @callback close(GenServer.server(), reason :: String.t(), code :: integer()) ::

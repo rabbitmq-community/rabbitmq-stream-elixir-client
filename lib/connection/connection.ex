@@ -35,6 +35,7 @@ defmodule RabbitMQStream.Connection do
   * `vhost` - The virtual host to use. Defaults to `/`.
   * `frame_max` - The maximum frame size in Bytes. Defaults to `1_048_576`.
   * `heartbeat` - The heartbeat interval in seconds. Defaults to `60`.
+  * `connect_timeout` - The TCP/TLS connect timeout in milliseconds. Defaults to `10_000`.
   * `lazy` - If `true`, the connection won't starting until explicitly calling `connect/1`. Defaults to `false`.
 
 
@@ -101,8 +102,8 @@ defmodule RabbitMQStream.Connection do
         GenServer.stop(__MODULE__, reason, timeout)
       end
 
-      def connect() do
-        RabbitMQStream.Connection.connect(__MODULE__)
+      def connect(timeout \\ :infinity) do
+        RabbitMQStream.Connection.connect(__MODULE__, timeout)
       end
 
       def close(reason \\ "", code \\ 0x00) do
@@ -226,14 +227,47 @@ defmodule RabbitMQStream.Connection do
   end
 
   @doc """
+  Returns this connection's raw configuration options (host, port, vhost, username,
+  password, frame_max, heartbeat, transport, etc). Works regardless of connection
+  state, since it's a local read rather than a protocol round-trip. Used internally
+  by leader routing to open a connection to another broker node with the same
+  vhost/credentials/transport as this one.
+  """
+  @spec get_options(GenServer.server()) :: connection_options()
+  def get_options(server) do
+    GenServer.call(server, :get_options)
+  end
+
+  @doc """
+  Returns the `connection_properties` the broker sent back in its `Open` response for
+  this connection, as a map (e.g. `"advertised_host"`, `"advertised_port"`). Unlike
+  `get_options/1`, these are the broker's own view of this connection's address, not
+  what the caller dialed -- used by leader routing to compare against a stream leader's
+  advertised address from `query_metadata/2` without assuming the dialed address and
+  the broker-advertised address are the same string. Empty until the connection has
+  finished opening.
+  """
+  @spec get_connection_properties(GenServer.server()) :: %{String.t() => String.t()}
+  def get_connection_properties(server) do
+    GenServer.call(server, :get_connection_properties)
+  end
+
+  @doc """
   Starts the connection process with the RabbitMQ Stream server, and waits
   until the authentication is complete.
 
   If the authentication process has already been started by other process,
   this call waits for it to complete before return the result.
+
+  `timeout` bounds this call itself and defaults to `:infinity`. The connect/auth
+  work it's waiting on is already bounded by the `:connect_timeout` connection option
+  (default 10s) regardless of what's passed here, so the default just means "wait for
+  that actual, bounded outcome" rather than imposing a second, independent guess at how
+  long it might take. Pass a shorter `timeout` only if the caller wants to bail out
+  before `:connect_timeout` elapses -- e.g. it has its own tighter deadline.
   """
-  def connect(server) do
-    GenServer.call(server, {:connect})
+  def connect(server, timeout \\ :infinity) do
+    GenServer.call(server, {:connect}, timeout)
   end
 
   @doc """
@@ -510,6 +544,7 @@ defmodule RabbitMQStream.Connection do
           | {:vhost, String.t()}
           | {:frame_max, non_neg_integer()}
           | {:heartbeat, non_neg_integer()}
+          | {:connect_timeout, non_neg_integer()}
           | {:lazy, boolean()}
   @type t() :: %RabbitMQStream.Connection{
           options: connection_options,
