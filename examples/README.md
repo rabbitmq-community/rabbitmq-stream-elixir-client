@@ -20,3 +20,4 @@ mix run examples/<folder>/<file>.exs
 - [Single Active Consumer](./single_active_consumer) - Single Active Consumer example.
 - [Super Stream](./super_stream) - Super Stream example with Single Active Consumer.
 - [Manual Credit](./manual_credit/manual_credit.exs) - Manual credit/flow-control strategy example.
+- [Deduplication](./deduplication/deduplication.exs) - Message deduplication via a stable producer `reference_name`.
