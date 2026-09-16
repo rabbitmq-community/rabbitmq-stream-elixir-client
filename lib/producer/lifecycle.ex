@@ -82,6 +82,24 @@ defmodule RabbitMQStream.Producer.LifeCycle do
   end
 
   @impl GenServer
+  def handle_info({:publish_confirm, publishing_ids}, state) do
+    if function_exported?(state.producer_module, :handle_confirm, 1) do
+      apply(state.producer_module, :handle_confirm, [publishing_ids])
+    end
+
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_info({:publish_error, errors}, state) do
+    if function_exported?(state.producer_module, :handle_publish_error, 1) do
+      apply(state.producer_module, :handle_publish_error, [errors])
+    end
+
+    {:noreply, state}
+  end
+
+  @impl GenServer
   def terminate({:connection_down, _reason}, _state), do: :ok
 
   def terminate(_reason, %{id: nil}), do: :ok

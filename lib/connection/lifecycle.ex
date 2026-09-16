@@ -120,6 +120,15 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     {:noreply, conn}
   end
 
+  def handle_call({:delete_producer, opts}, from, %Connection{} = conn) do
+    conn =
+      conn
+      |> Helpers.push_tracker(:delete_producer, from, opts[:producer_id])
+      |> send_request(:delete_producer, opts)
+
+    {:noreply, conn}
+  end
+
   def handle_call({:supports?, command, version}, _from, %Connection{} = conn) do
     flag =
       case conn.commands do
@@ -136,7 +145,6 @@ defmodule RabbitMQStream.Connection.Lifecycle do
   def handle_call({command, opts}, from, %Connection{} = conn)
       when command in [
              :query_offset,
-             :delete_producer,
              :query_metadata,
              :query_producer_sequence,
              :delete_stream,

@@ -23,6 +23,23 @@ defmodule RabbitMQStreamTest.Producer do
     end
   end
 
+  defmodule ConfirmingProducer do
+    use RabbitMQStream.Producer,
+      connection: RabbitMQStreamTest.Producer.SupervisedConnection
+
+    @impl true
+    def before_start(_opts, state) do
+      RabbitMQStream.Connection.create_stream(state.connection, state.stream_name)
+
+      state
+    end
+
+    @impl true
+    def handle_confirm(publishing_ids) do
+      send(Process.whereis(:producer_confirm_test_listener), {:confirmed, publishing_ids})
+    end
+  end
+
   defmodule CustomRoutingProducer do
     use RabbitMQStream.Producer,
       connection: RabbitMQStreamTest.Producer.SupervisedConnection
@@ -127,6 +144,24 @@ defmodule RabbitMQStreamTest.Producer do
     sequence = sequence + 1
 
     assert %{sequence: ^sequence} = :sys.get_state(Process.whereis(SupervisorProducer))
+
+    SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "producer-test-04"
+  @reference_name "producer-test-reference-04"
+  test "should notify handle_confirm/1 with confirmed publishing_ids" do
+    Process.register(self(), :producer_confirm_test_listener)
+
+    {:ok, _} =
+      ConfirmingProducer.start_link(
+        reference_name: @reference_name,
+        stream_name: @stream
+      )
+
+    ConfirmingProducer.publish(inspect(%{message: "Hello, world!"}))
+
+    assert_receive {:confirmed, [_publishing_id]}, 1000
 
     SupervisedConnection.delete_stream(@stream)
   end
