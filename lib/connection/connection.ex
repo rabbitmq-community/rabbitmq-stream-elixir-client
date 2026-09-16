@@ -145,8 +145,8 @@ defmodule RabbitMQStream.Connection do
       def query_producer_sequence(stream_name, producer_reference) do
         RabbitMQStream.Connection.query_producer_sequence(
           __MODULE__,
-          producer_reference,
-          stream_name
+          stream_name,
+          producer_reference
         )
       end
 

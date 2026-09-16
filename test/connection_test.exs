@@ -175,10 +175,16 @@ defmodule RabbitMQStreamTest.Connection do
     :ok = SupervisedConnection.connect()
     SupervisedConnection.delete_stream(@stream)
     :ok = SupervisedConnection.create_stream(@stream)
-    {:ok, _} = SupervisedConnection.declare_producer(@stream, @producer)
+    {:ok, id} = SupervisedConnection.declare_producer(@stream, @producer)
 
     # Should be 0 since the producer was just declared
     assert {:ok, 0} = SupervisedConnection.query_producer_sequence(@stream, @producer)
+
+    :ok = SupervisedConnection.publish(id, 5, "Hello, world!")
+    assert_receive {:publish_confirm, [5]}
+
+    # Should reflect the publishing_id we just published and got confirmed, not 0
+    assert {:ok, 5} = SupervisedConnection.query_producer_sequence(@stream, @producer)
 
     :ok = SupervisedConnection.delete_producer(1)
     :ok = SupervisedConnection.delete_stream(@stream)
