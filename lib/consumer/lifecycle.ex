@@ -168,6 +168,39 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
     {:stop, {:connection_down, reason}, state}
   end
 
+  # The connection dropped and reconnected in place (same pid, fresh socket/session).
+  # The broker forgot this subscription entirely, so resubscribe from scratch, using
+  # the last tracked offset as the resume point (falling back to the original
+  # `initial_offset` if nothing was ever delivered yet -- `last_offset == 0` is the
+  # existing sentinel this codebase already relies on for that, see `terminate/2`).
+  # `state.properties` is passed unchanged, so a single-active-consumer subscription
+  # re-enters the broker's election exactly as on first start; the resume offset for
+  # whichever member is (re-)elected active flows back through the existing
+  # `consumer_update`/`handle_update/2` exchange below, not through this offset.
+  @impl true
+  def handle_info({:connection_reconnected}, state) do
+    resume_offset = if state.last_offset != 0, do: {:offset, state.last_offset}, else: state.initial_offset
+
+    case RabbitMQStream.Connection.subscribe(
+           state.connection,
+           state.stream_name,
+           self(),
+           resume_offset,
+           state.initial_credit,
+           state.properties
+         ) do
+      {:ok, id} ->
+        {:noreply, %{state | id: id, credits: state.initial_credit}}
+
+      err ->
+        Logger.error(
+          "#{state.consumer_module}: Failed to resubscribe to #{state.stream_name} after reconnect: #{inspect(err)}. Stopping."
+        )
+
+        {:stop, err, %{state | id: nil}}
+    end
+  end
+
   @impl true
   def handle_info({:deliver, %DeliverData{osiris_chunk: %RabbitMQStream.OsirisChunk{} = chunk}}, state) do
     if function_exported?(state.consumer_module, :handle_chunk, 2) do

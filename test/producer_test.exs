@@ -1,5 +1,6 @@
 defmodule RabbitMQStreamTest.Producer do
   use ExUnit.Case, async: false
+  alias RabbitMQStream.Connection
 
   @moduletag :v3_11
   @moduletag :v3_12
@@ -73,7 +74,9 @@ defmodule RabbitMQStreamTest.Producer do
       end
     end)
 
-    {:ok, _conn} = SupervisedConnection.start_link(host: "localhost", vhost: "/")
+    {:ok, _conn} =
+      SupervisedConnection.start_link(host: "localhost", vhost: "/", backoff: {:exponential, initial: 10, max: 50})
+
     :ok = SupervisedConnection.connect()
 
     :ok
@@ -161,6 +164,38 @@ defmodule RabbitMQStreamTest.Producer do
 
     ConfirmingProducer.publish(inspect(%{message: "Hello, world!"}))
 
+    assert_receive {:confirmed, [_publishing_id]}, 1000
+
+    SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "producer-test-05"
+  @reference_name "producer-test-reference-05"
+  test "redeclares itself and keeps publishing after its connection recovers from a drop" do
+    Process.register(self(), :producer_confirm_test_listener)
+
+    {:ok, _} =
+      ConfirmingProducer.start_link(
+        reference_name: @reference_name,
+        stream_name: @stream
+      )
+
+    ConfirmingProducer.publish(inspect(%{message: "before the drop"}))
+    assert_receive {:confirmed, [_publishing_id]}, 1000
+
+    %{connection: conn} = :sys.get_state(Process.whereis(ConfirmingProducer))
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+
+    # Blocks until the connection reopens (see connection_test.exs), which happens
+    # strictly after this producer's `{:connection_reconnected}` notification was
+    # already sent (handler.ex notifies before replying to `connect/1` callers).
+    assert :ok = SupervisedConnection.connect(5_000)
+
+    # Proves the producer actually redeclared itself against the new session (not
+    # just that local state changed): a stale, pre-drop producer_id would not confirm.
+    ConfirmingProducer.publish(inspect(%{message: "after the drop"}))
     assert_receive {:confirmed, [_publishing_id]}, 1000
 
     SupervisedConnection.delete_stream(@stream)

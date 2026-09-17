@@ -1,6 +1,6 @@
 defmodule RabbitMQStreamTest.SuperStream do
   use ExUnit.Case, async: false
-  alias RabbitMQStream.OsirisChunk
+  alias RabbitMQStream.{Connection, OsirisChunk}
 
   defmodule SuperConsumer1 do
     use RabbitMQStream.SuperConsumer,
@@ -122,7 +122,13 @@ defmodule RabbitMQStreamTest.SuperStream do
   end
 
   setup do
-    {:ok, conn} = RabbitMQStream.Connection.start_link(host: "localhost", vhost: "/")
+    {:ok, conn} =
+      RabbitMQStream.Connection.start_link(
+        host: "localhost",
+        vhost: "/",
+        backoff: {:exponential, initial: 10, max: 50}
+      )
+
     :ok = RabbitMQStream.Connection.connect(conn)
 
     on_exit(fn -> stop_connection(conn) end)
@@ -230,6 +236,57 @@ defmodule RabbitMQStreamTest.SuperStream do
     assert SuperConsumer3 in modules
 
     :ok = RabbitMQStream.Connection.delete_super_stream(conn, "transactions")
+  end
+
+  @tag :v3_13
+  @tag :v4_2
+  @tag :v4_3
+  test "a partition's producer/consumer recover after their shared connection drops", %{conn: conn} do
+    RabbitMQStream.Connection.delete_super_stream(conn, "reconnect-test")
+
+    :ok =
+      RabbitMQStream.Connection.create_super_stream(conn, "reconnect-test",
+        "route-A": ["reconnect-test-0"],
+        "route-B": ["reconnect-test-1"]
+      )
+
+    {:ok, _} =
+      SuperConsumer1.start_link(
+        connection: conn,
+        super_stream: "reconnect-test",
+        private: self()
+      )
+
+    wait_super_consumer_ready(SuperConsumer1)
+
+    {:ok, _} =
+      SuperProducer2.start_link(
+        connection: conn,
+        super_stream: "reconnect-test"
+      )
+
+    Process.sleep(@broker_subscription_activation_margin)
+
+    :ok = SuperProducer2.publish("1")
+    assert_receive SuperConsumer1, 500
+
+    %Connection{socket: socket} = :sys.get_state(conn)
+    send(conn, {:tcp_closed, socket})
+
+    # Blocks until the connection reopens, which happens strictly after the
+    # partition producer/consumer's `{:connection_reconnected}` notifications were
+    # already sent (they're ordinary Producer.LifeCycle/Consumer.LifeCycle
+    # processes, same mechanism as plain streams -- no super-stream-specific work).
+    assert :ok = RabbitMQStream.Connection.connect(conn, 5_000)
+
+    Process.sleep(@broker_subscription_activation_margin)
+
+    # Proves the partition producer/consumer actually redeclared/resubscribed
+    # against the new session, not just that local state changed.
+    :ok = SuperProducer2.publish("1")
+    assert_receive SuperConsumer1, 500
+
+    :ok = RabbitMQStream.Connection.delete_super_stream(conn, "reconnect-test")
   end
 
   @tag :v3_11

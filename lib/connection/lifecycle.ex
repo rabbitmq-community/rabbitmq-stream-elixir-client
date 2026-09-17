@@ -7,7 +7,7 @@ defmodule RabbitMQStream.Connection.Lifecycle do
 
   alias RabbitMQStream.Message.Request
   alias RabbitMQStream.Connection
-  alias RabbitMQStream.Connection.{Handler, Helpers}
+  alias RabbitMQStream.Connection.{Backoff, Handler, Helpers}
 
   alias RabbitMQStream.Message
   alias RabbitMQStream.Message.{Buffer, Encoder}
@@ -27,6 +27,8 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       |> Keyword.put_new(:heartbeat, 60)
       |> Keyword.put_new(:connect_timeout, 10_000)
       |> Keyword.put_new(:transport, :tcp)
+      |> Keyword.put_new(:reconnect, true)
+      |> Keyword.put_new(:backoff, :exponential)
 
     transport =
       case transport do
@@ -35,7 +37,7 @@ defmodule RabbitMQStream.Connection.Lifecycle do
         transport -> transport
       end
 
-    conn = %RabbitMQStream.Connection{options: opts, transport: transport}
+    conn = %RabbitMQStream.Connection{options: opts, transport: transport, backoff: Backoff.init(opts[:backoff])}
 
     if opts[:lazy] == true do
       {:ok, conn}
@@ -260,12 +262,12 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     end
 
     %{conn | close_reason: key}
-    |> handle_closing()
+    |> handle_drop()
   end
 
   def handle_info({key, _socket, reason}, conn) when key in [:tcp_error, :ssl_error] do
     %{conn | close_reason: reason}
-    |> handle_closing()
+    |> handle_drop()
   end
 
   def handle_info({:heartbeat}, conn) do
@@ -283,6 +285,32 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     Logger.warning("Connection is closed. Ignoring flush buffer request.")
     {:noreply, conn}
   end
+
+  # A reconnect attempt either succeeds (which reuses the normal `connect/1` +
+  # handshake path below, unaware it's a reconnect) or fails and reschedules the next
+  # attempt via the connection's backoff strategy. A message for an attempt number
+  # that's no longer current means the state already moved on (e.g. a newer attempt
+  # already succeeded, or a second drop restarted the counter) -- safe to ignore.
+  def handle_info(
+        {:reconnect_attempt, attempt},
+        %Connection{state: :reconnecting, reconnect_attempts: attempt} = conn
+      ) do
+    Logger.debug("Reconnect attempt #{attempt} to #{conn.options[:host]}:#{conn.options[:port]}")
+
+    with {:ok, conn} <- connect(conn) do
+      conn =
+        conn
+        |> Helpers.push_internal(:request, :peer_properties)
+        |> flush_buffer(:internal)
+
+      {:noreply, conn}
+    else
+      _ ->
+        schedule_reconnect(conn, attempt + 1)
+    end
+  end
+
+  def handle_info({:reconnect_attempt, _attempt}, conn), do: {:noreply, conn}
 
   # I'm not really sure how to test this behavior at the moment.
   def handle_info(:flush_request_buffer, %Connection{} = conn) do
@@ -336,9 +364,7 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       GenServer.reply(request, {:error, :closed})
     end
 
-    if is_port(conn.socket) do
-      :ok = conn.transport.close(conn.socket)
-    end
+    close_socket(conn)
 
     for {client, _data} <- Map.values(conn.request_tracker) do
       GenServer.reply(client, {:error, {:closed, conn.close_reason}})
@@ -350,6 +376,82 @@ defmodule RabbitMQStream.Connection.Lifecycle do
   end
 
   defp handle_closing(conn), do: {:noreply, conn}
+
+  # A drop of an already-established socket (`:tcp_closed`/`:ssl_closed`/`:tcp_error`/
+  # `:ssl_error`). A drop while a genuine protocol-level close is already in flight
+  # (`:closing`) or after the connection already finished closing (`:closed`) isn't a
+  # drop to recover from -- fall through to the existing teardown instead.
+  defp handle_drop(%Connection{state: state} = conn) when state in [:closing, :closed] do
+    handle_closing(conn)
+  end
+
+  defp handle_drop(%Connection{} = conn) do
+    close_socket(conn)
+
+    # The broker-side ids behind these are gone with the socket -- clear them so a
+    # stray cast/call against a stale id doesn't silently misfire once reconnected.
+    # Capture (accumulating, in case a second drop happens before recovery completes)
+    # the pids so they can be notified to redeclare/resubscribe themselves once the
+    # connection reopens.
+    targets =
+      (Map.values(conn.subscriptions) ++ Map.values(conn.producers) ++ conn.reconnect_targets)
+      |> Enum.uniq()
+      |> Enum.reject(&is_nil/1)
+
+    # In-flight protocol requests die with the TCP session -- there is nothing for a
+    # future reconnect to resume them against, so fail them now rather than leaving
+    # the caller hanging until (or unless) a reconnect eventually succeeds.
+    for {client, _data} <- Map.values(conn.request_tracker) do
+      GenServer.reply(client, {:error, {:closed, conn.close_reason}})
+    end
+
+    conn = %{
+      conn
+      | socket: nil,
+        subscriptions: %{},
+        producers: %{},
+        request_tracker: %{},
+        frames_buffer: Buffer.init(),
+        internal_buffer: :queue.new(),
+        user_buffer: :queue.new()
+    }
+
+    if conn.options[:reconnect] do
+      schedule_reconnect(%{conn | state: :reconnecting, reconnect_targets: targets}, 1)
+    else
+      for request <- conn.connect_requests do
+        GenServer.reply(request, {:error, :closed})
+      end
+
+      close_reason = conn.close_reason
+      {:stop, {:shutdown, {:connection_closed, close_reason}}, %{conn | connect_requests: []}}
+    end
+  end
+
+  defp schedule_reconnect(%Connection{} = conn, attempt) do
+    case Backoff.next_delay(conn.backoff, attempt) do
+      {delay, backoff} ->
+        Process.send_after(self(), {:reconnect_attempt, attempt}, delay)
+        {:noreply, %{conn | backoff: backoff, reconnect_attempts: attempt, state: :reconnecting}}
+
+      :stop ->
+        for request <- conn.connect_requests do
+          GenServer.reply(request, {:error, :closed})
+        end
+
+        close_reason = conn.close_reason
+        {:stop, {:shutdown, {:connection_closed, close_reason}}, %{conn | connect_requests: []}}
+    end
+  end
+
+  defp close_socket(%Connection{socket: nil}), do: :ok
+
+  defp close_socket(%Connection{} = conn) do
+    case conn.transport.close(conn.socket) do
+      :ok -> :ok
+      {:error, :closed} -> :ok
+    end
+  end
 
   defp send_request(%Connection{} = conn, command, opts) do
     conn

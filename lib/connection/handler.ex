@@ -181,13 +181,27 @@ defmodule RabbitMQStream.Connection.Handler do
       when [version.major, version.minor] < [3, 13] do
     Logger.debug("Successfully opened connection with vhost: \"#{conn.options[:vhost]}\"")
 
+    # Notify former producers/subscribers first, so anything observing `connect/1`'s
+    # reply below (which happens next) is guaranteed the redeclare/resubscribe sends
+    # have already been issued.
+    for pid <- conn.reconnect_targets do
+      send(pid, {:connection_reconnected})
+    end
+
     for request <- conn.connect_requests do
       GenServer.reply(request, :ok)
     end
 
     send(self(), :flush_request_buffer)
 
-    %{conn | state: :open, connect_requests: [], connection_properties: response.data.connection_properties}
+    %{
+      conn
+      | state: :open,
+        connect_requests: [],
+        connection_properties: response.data.connection_properties,
+        reconnect_targets: [],
+        reconnect_attempts: 0
+    }
   end
 
   def handle_message(
@@ -294,12 +308,24 @@ defmodule RabbitMQStream.Connection.Handler do
         {command.key, %{min: command.min_version, max: command.max_version}}
       end)
 
+    for pid <- conn.reconnect_targets do
+      send(pid, {:connection_reconnected})
+    end
+
     for request <- conn.connect_requests do
       GenServer.reply(request, :ok)
     end
 
     send(self(), :flush_request_buffer)
-    %{conn | state: :open, connect_requests: [], commands: commands}
+
+    %{
+      conn
+      | state: :open,
+        connect_requests: [],
+        commands: commands,
+        reconnect_targets: [],
+        reconnect_attempts: 0
+    }
   end
 
   def handle_message(%Connection{} = conn, %Response{command: command, data: data} = response)

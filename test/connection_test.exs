@@ -208,4 +208,45 @@ defmodule RabbitMQStreamTest.Connection do
   #   :ok = SupervisedConnection.connect()
 
   # end
+
+  test "automatically reconnects after a TCP drop" do
+    {:ok, conn} =
+      SupervisedConnection.start_link(
+        host: "localhost",
+        vhost: "/",
+        backoff: {:exponential, initial: 10, max: 50}
+      )
+
+    :ok = SupervisedConnection.connect()
+
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+
+    # `connect/1` while `:reconnecting` queues onto `connect_requests` and only
+    # replies once the connection reaches `:open` again -- this both waits for
+    # recovery and proves it actually happened, with no polling needed. Since both
+    # this call and the drop above are sent from this same test process to the same
+    # connection process, they're guaranteed to be processed in that order.
+    assert :ok = SupervisedConnection.connect(5_000)
+
+    assert %Connection{state: :open} = :sys.get_state(conn)
+  end
+
+  test "with reconnect: false, a drop stops the connection in an orderly way instead of recovering" do
+    # start_link/1 links this test process to the connection -- trap exits so its
+    # intentional `{:shutdown, _}` stop below doesn't crash this test too.
+    Process.flag(:trap_exit, true)
+
+    {:ok, pid} = SupervisedConnection.start_link(host: "localhost", vhost: "/", reconnect: false)
+    :ok = SupervisedConnection.connect()
+
+    ref = Process.monitor(pid)
+
+    %Connection{socket: socket} = :sys.get_state(pid)
+
+    send(pid, {:tcp_closed, socket})
+
+    assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, {:connection_closed, :tcp_closed}}}, 1_000
+  end
 end
