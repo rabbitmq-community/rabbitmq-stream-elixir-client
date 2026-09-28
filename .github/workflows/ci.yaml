@@ -64,7 +64,7 @@ jobs:
 
       - uses: actions/checkout@v7
 
-      - uses: isbang/compose-action@v3.1.0
+      - uses: isbang/compose-action@v3.2.0
         with:
           compose-file: "./services/docker-compose.yaml"
           services: "rabbitmq_stream_${{ matrix.version }}"
