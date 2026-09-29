@@ -320,7 +320,7 @@ defmodule RabbitMQStream.Message.Types do
     # @moduledoc """
     # Supported properties:
 
-    # * `single-active-consumer`: set to `true` to enable [single active consumer](https://blog.rabbitmq.com/posts/2022/07/rabbitmq-3-11-feature-preview-single-active-consumer-for-streams/) for this subscription.
+    # * `single-active-consumer`: set to the consumer group's name to enable [single active consumer](https://blog.rabbitmq.com/posts/2022/07/rabbitmq-3-11-feature-preview-single-active-consumer-for-streams/) for this subscription.
     # * `super-stream`: set to the name of the super stream the subscribed is a partition of.
     # * `filter.` (e.g. `filter.0`, `filter.1`, etc): prefix to use to define filter values for the subscription.
     # * `match-unfiltered`: whether to return messages without any filter value or not.
