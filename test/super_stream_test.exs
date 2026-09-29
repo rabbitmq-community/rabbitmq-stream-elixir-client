@@ -76,6 +76,28 @@ defmodule RabbitMQStreamTest.SuperStream do
     end
   end
 
+  defmodule ShutdownSuperConsumer do
+    use RabbitMQStream.SuperConsumer,
+      initial_offset: :next,
+      partitions: 1
+
+    @impl true
+    def handle_chunk(%OsirisChunk{}, %{private: parent}) do
+      send(parent, :chunk)
+
+      :ok
+    end
+
+    @impl true
+    def handle_update(state, _) do
+      {:ok, state.initial_offset}
+    end
+  end
+
+  defmodule ShutdownSuperProducer do
+    use RabbitMQStream.SuperProducer, partitions: 1
+  end
+
   # Synchronous, so the next test's fixed-name start_link can't race a still-running one.
   defp stop_super_stream_fixture(module) do
     case Process.whereis(module) do
@@ -271,5 +293,52 @@ defmodule RabbitMQStreamTest.SuperStream do
     assert SuperConsumer1 in modules
     assert SuperConsumer2 in modules
     assert SuperConsumer3 in modules
+  end
+
+  # A per-partition child has no GenServer.stop/1 path at all, only Supervisor.stop/1 on
+  # its SuperConsumer/SuperProducer.
+  @tag :v3_13
+  @tag :v4_2
+  @tag :v4_3
+  test "terminate/2 runs for per-partition children on SuperConsumer/SuperProducer's own Supervisor.stop/1",
+       %{conn: conn} do
+    super_stream = "supervised-shutdown-super-stream"
+    RabbitMQStream.Connection.delete_super_stream(conn, super_stream)
+    :ok = RabbitMQStream.Connection.create_super_stream(conn, super_stream, "0": ["#{super_stream}-0"])
+
+    {:ok, _} =
+      ShutdownSuperConsumer.start_link(connection: conn, super_stream: super_stream, private: self())
+
+    wait_super_consumer_ready(ShutdownSuperConsumer)
+
+    {:ok, _} = ShutdownSuperProducer.start_link(connection: conn, super_stream: super_stream)
+    Process.sleep(@broker_subscription_activation_margin)
+
+    :ok = ShutdownSuperProducer.publish("hello")
+    assert_receive :chunk, 500
+
+    [consumer_pid] = Registry.select(ShutdownSuperConsumer.Registry, [{{:_, :"$1", :_}, [], [:"$1"]}])
+    [producer_pid] = Registry.select(ShutdownSuperProducer.Registry, [{{:_, :"$1", :_}, [], [:"$1"]}])
+
+    %{connection: consumer_conn, id: subscription_id, offset_reference: offset_ref, stream_name: partition_stream} =
+      :sys.get_state(consumer_pid)
+
+    %{connection: producer_conn, id: producer_id} = :sys.get_state(producer_pid)
+
+    assert {:error, :no_offset} = RabbitMQStream.Connection.query_offset(conn, partition_stream, offset_ref)
+
+    assert :ok = Supervisor.stop(ShutdownSuperConsumer)
+    assert :ok = Supervisor.stop(ShutdownSuperProducer)
+
+    refute Process.alive?(consumer_pid)
+    refute Process.alive?(producer_pid)
+
+    assert {:ok, offset} = RabbitMQStream.Connection.query_offset(conn, partition_stream, offset_ref)
+    assert offset > 0
+
+    refute Map.has_key?(:sys.get_state(consumer_conn).subscriptions, subscription_id)
+    refute Map.has_key?(:sys.get_state(producer_conn).producers, producer_id)
+
+    RabbitMQStream.Connection.delete_super_stream(conn, super_stream)
   end
 end
