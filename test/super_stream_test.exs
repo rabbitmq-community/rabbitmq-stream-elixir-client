@@ -76,9 +76,34 @@ defmodule RabbitMQStreamTest.SuperStream do
     end
   end
 
+  # Synchronous, so the next test's fixed-name start_link can't race a still-running one.
+  defp stop_super_stream_fixture(module) do
+    case Process.whereis(module) do
+      nil ->
+        :ok
+
+      pid ->
+        try do
+          Supervisor.stop(pid)
+        catch
+          :exit, _ -> :ok
+        end
+    end
+  end
+
+  defp stop_connection(conn) do
+    try do
+      GenServer.stop(conn)
+    catch
+      :exit, _ -> :ok
+    end
+  end
+
   setup do
     {:ok, conn} = RabbitMQStream.Connection.start_link(host: "localhost", vhost: "/")
     :ok = RabbitMQStream.Connection.connect(conn)
+
+    on_exit(fn -> stop_connection(conn) end)
 
     [conn: conn]
   end
@@ -136,6 +161,7 @@ defmodule RabbitMQStreamTest.SuperStream do
     for consumer <- [SuperConsumer1, SuperConsumer2, SuperConsumer3] do
       {:ok, conn} = RabbitMQStream.Connection.start_link(host: "localhost", vhost: "/")
       :ok = RabbitMQStream.Connection.connect(conn)
+      on_exit(fn -> stop_connection(conn) end)
 
       {:ok, _} =
         consumer.start_link(
@@ -143,6 +169,8 @@ defmodule RabbitMQStreamTest.SuperStream do
           super_stream: "transactions",
           private: self()
         )
+
+      on_exit(fn -> stop_super_stream_fixture(consumer) end)
 
       wait_super_consumer_ready(consumer)
     end
@@ -152,6 +180,8 @@ defmodule RabbitMQStreamTest.SuperStream do
         connection: conn,
         super_stream: "transactions"
       )
+
+    on_exit(fn -> stop_super_stream_fixture(SuperProducer2) end)
 
     Process.sleep(@broker_subscription_activation_margin)
 
@@ -196,6 +226,7 @@ defmodule RabbitMQStreamTest.SuperStream do
     for consumer <- [SuperConsumer1, SuperConsumer2, SuperConsumer3] do
       {:ok, conn} = RabbitMQStream.Connection.start_link(host: "localhost", vhost: "/")
       :ok = RabbitMQStream.Connection.connect(conn)
+      on_exit(fn -> stop_connection(conn) end)
 
       {:ok, _} =
         consumer.start_link(
@@ -203,6 +234,8 @@ defmodule RabbitMQStreamTest.SuperStream do
           super_stream: "invoices",
           private: self()
         )
+
+      on_exit(fn -> stop_super_stream_fixture(consumer) end)
 
       wait_super_consumer_ready(consumer)
     end
@@ -212,6 +245,8 @@ defmodule RabbitMQStreamTest.SuperStream do
         connection: conn,
         super_stream: "invoices"
       )
+
+    on_exit(fn -> stop_super_stream_fixture(SuperProducer1) end)
 
     Process.sleep(@broker_subscription_activation_margin)
 
