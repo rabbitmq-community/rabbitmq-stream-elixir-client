@@ -35,7 +35,9 @@ defmodule RabbitMQStream.Consumer do
 
 
   * `:properties` - Define the properties of the subscription. Can only have one option at a time.
-    * `:single_active_consumer`: set to `true` to enable [single active consumer](https://blog.rabbitmq.com/posts/2022/07/rabbitmq-3-11-feature-preview-single-active-consumer-for-streams/) for this subscription.
+    * `:single_active_consumer`: set to the consumer group's name (a string) to enable
+      [single active consumer](https://blog.rabbitmq.com/posts/2022/07/rabbitmq-3-11-feature-preview-single-active-consumer-for-streams/)
+      for this subscription, e.g. `properties: [single_active_consumer: "my-group-name"]`.
     * `:super_stream`: set to the name of the super stream the subscribed is a partition of.
     * `:filter`: List of strings that define the value of the filter_key to match.
     * `:match_unfiltered`: whether to return messages without any filter value or not.
@@ -160,8 +162,15 @@ defmodule RabbitMQStream.Consumer do
 
 
   ## Single active consumer
-  To use it, you must provide a "group_name". The server manages each consumer so the only one will
-  of each group will be receiving chunks at a time.
+  To use it, you must provide a "group_name" via the `:single_active_consumer` property. The
+  server manages each consumer so the only one will of each group will be receiving chunks at
+  a time.
+
+      use RabbitMQStream.Consumer,
+          connection: MyApp.MyConnection,
+          stream_name: "my_stream",
+          initial_offset: :first,
+          properties: [single_active_consumer: "my-group-name"]
 
 
   Although there is only one Consumer active, we must provide the server the offset a consumer starts

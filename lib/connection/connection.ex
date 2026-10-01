@@ -415,7 +415,9 @@ defmodule RabbitMQStream.Connection do
   You can optionally provide properties when declaring the subscription. The
   avaiable options are the following:
 
-  * `:single_active_consumer`: set to `true` to enable [single active consumer](https://blog.rabbitmq.com/posts/2022/07/rabbitmq-3-11-feature-preview-single-active-consumer-for-streams/) for this subscription.
+  * `:single_active_consumer`: set to the consumer group's name (a string) to enable
+    [single active consumer](https://blog.rabbitmq.com/posts/2022/07/rabbitmq-3-11-feature-preview-single-active-consumer-for-streams/)
+    for this subscription, e.g. `single_active_consumer: "my-group-name"`.
   * `:super_stream`: set to the name of the super stream the subscribed is a partition of.
   * `:filter`: List of strings that define the value of the filter_key to match.
   * `:match_unfiltered`: whether to return messages without any filter value or not.
