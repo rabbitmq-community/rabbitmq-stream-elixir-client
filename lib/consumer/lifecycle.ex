@@ -9,6 +9,9 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
 
   @impl true
   def init(opts \\ []) do
+    # Makes a normal supervised shutdown (not just GenServer.stop/1) run terminate/2 too.
+    Process.flag(:trap_exit, true)
+
     opts =
       opts
       |> Keyword.put_new(:initial_credit, 50_000)
@@ -131,16 +134,23 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
 
     # While not guaranteed, we attempt to store the offset when terminating. Useful for when performing
     # upgrades, and in a 'single-active-consumer' scenario.
-    if state.last_offset != 0 do
-      RabbitMQStream.Connection.store_offset(
-        state.connection,
-        state.stream_name,
-        state.offset_reference,
-        state.last_offset
-      )
+    #
+    # state.connection may already be gone if it's being torn down concurrently.
+    try do
+      if state.last_offset != 0 do
+        RabbitMQStream.Connection.store_offset(
+          state.connection,
+          state.stream_name,
+          state.offset_reference,
+          state.last_offset
+        )
+      end
+
+      RabbitMQStream.Connection.unsubscribe(state.connection, state.id)
+    catch
+      :exit, _ -> :ok
     end
 
-    RabbitMQStream.Connection.unsubscribe(state.connection, state.id)
     :ok
   end
 

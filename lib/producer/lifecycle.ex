@@ -8,6 +8,9 @@ defmodule RabbitMQStream.Producer.LifeCycle do
   # Callbacks
   @impl GenServer
   def init(opts \\ []) do
+    # Makes a normal supervised shutdown (not just GenServer.stop/1) run terminate/2 too.
+    Process.flag(:trap_exit, true)
+
     reference_name = Keyword.get(opts, :reference_name, Atom.to_string(opts[:producer_module]))
     connection = Keyword.get(opts, :connection) || raise(":connection is required")
     stream_name = Keyword.get(opts, :stream_name) || raise(":stream_name is required")
@@ -105,7 +108,13 @@ defmodule RabbitMQStream.Producer.LifeCycle do
   def terminate(_reason, %{id: nil}), do: :ok
 
   def terminate(_reason, state) do
-    RabbitMQStream.Connection.delete_producer(state.connection, state.id)
+    # state.connection may already be gone if it's being torn down concurrently.
+    try do
+      RabbitMQStream.Connection.delete_producer(state.connection, state.id)
+    catch
+      :exit, _ -> :ok
+    end
+
     :ok
   end
 end
