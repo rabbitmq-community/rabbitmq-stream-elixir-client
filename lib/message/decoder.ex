@@ -19,6 +19,14 @@ defmodule RabbitMQStream.Message.Decoder do
     |> decode(buffer)
   end
 
+  def decode(%Response{command: :credit} = response, buffer) do
+    <<code::unsigned-integer-size(16), _subscription_id::unsigned-integer-size(8)>> = buffer
+
+    response = %{response | code: decode_code(code)}
+
+    %{response | data: Data.decode(response, "")}
+  end
+
   def decode(%Response{command: command} = response, buffer)
       when command in [
              :close,
@@ -28,7 +36,6 @@ defmodule RabbitMQStream.Message.Decoder do
              :delete_producer,
              :subscribe,
              :unsubscribe,
-             :credit,
              :query_offset,
              :query_producer_sequence,
              :peer_properties,
