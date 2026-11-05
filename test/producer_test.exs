@@ -200,4 +200,36 @@ defmodule RabbitMQStreamTest.Producer do
 
     SupervisedConnection.delete_stream(@stream)
   end
+
+  @stream "producer-test-06"
+  @reference_name "producer-test-reference-06"
+  test "holds messages published while reconnecting and sends them once redeclared" do
+    Process.register(self(), :producer_confirm_test_listener)
+
+    {:ok, producer} = ConfirmingProducer.start_link(reference_name: @reference_name, stream_name: @stream)
+
+    ConfirmingProducer.publish(inspect(%{message: "before the drop"}))
+    assert_receive {:confirmed, [_publishing_id]}, 1000
+
+    %{connection: conn} = :sys.get_state(producer)
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+    # Processed right after the drop, before its first reconnect attempt fires: keeps it reconnecting.
+    :sys.suspend(conn)
+
+    assert %RabbitMQStream.Producer{id: nil} = :sys.get_state(producer)
+
+    ConfirmingProducer.publish(inspect(%{message: "while reconnecting"}))
+    assert :queue.len(:sys.get_state(producer).pending) == 1
+    refute_receive {:confirmed, _}, 200
+
+    :sys.resume(conn)
+    assert :ok = SupervisedConnection.connect(5_000)
+
+    assert_receive {:confirmed, [_publishing_id]}, 1000
+    assert :queue.is_empty(:sys.get_state(producer).pending)
+
+    SupervisedConnection.delete_stream(@stream)
+  end
 end

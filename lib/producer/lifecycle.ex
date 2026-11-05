@@ -63,11 +63,15 @@ defmodule RabbitMQStream.Producer.LifeCycle do
     end
   end
 
+  # No live publisher id while the connection is reconnecting: hold the message until redeclared.
   @impl GenServer
-  def handle_cast({:publish, {message, filter_value}}, %RabbitMQStream.Producer{} = state) when is_binary(message) do
-    :ok = RabbitMQStream.Connection.publish(state.connection, state.id, state.sequence, message, filter_value)
+  def handle_cast({:publish, {message, filter_value}}, %RabbitMQStream.Producer{id: nil} = state)
+      when is_binary(message) do
+    {:noreply, %{state | pending: :queue.in({message, filter_value}, state.pending)}}
+  end
 
-    {:noreply, %{state | sequence: state.sequence + 1}}
+  def handle_cast({:publish, {message, filter_value}}, %RabbitMQStream.Producer{} = state) when is_binary(message) do
+    {:noreply, publish_now(state, message, filter_value)}
   end
 
   # A routed (non-seed) connection dying means the publisher `id` declared on it is
@@ -84,21 +88,28 @@ defmodule RabbitMQStream.Producer.LifeCycle do
     {:stop, {:connection_down, reason}, state}
   end
 
+  # The connection dropped: its publisher id died with the session, so publishes are held from here on.
+  @impl GenServer
+  def handle_info({:connection_lost}, state) do
+    {:noreply, %{state | id: nil}}
+  end
+
   # The connection dropped and reconnected in place (same pid, fresh socket/session).
   # The broker forgot this producer entirely, so redeclare it from scratch -- reusing
   # the same `reference_name` this process already owns, exactly as `handle_continue/2`
-  # does on first start -- and pick up a fresh `id`/`sequence` for the new session.
+  # does on first start -- and pick up a fresh `id`/`sequence` for the new session,
+  # then send whatever was published while reconnecting.
   @impl GenServer
   def handle_info({:connection_reconnected}, state) do
     with {:ok, id} <-
            RabbitMQStream.Connection.declare_producer(state.connection, state.stream_name, state.reference_name),
          {:ok, sequence} <-
            RabbitMQStream.Connection.query_producer_sequence(state.connection, state.stream_name, state.reference_name) do
-      {:noreply, %{state | id: id, sequence: sequence + 1}}
+      {:noreply, flush_pending(%{state | id: id, sequence: sequence + 1})}
     else
       err ->
         Logger.error(
-          "#{state.producer_module}: Failed to redeclare producer #{state.stream_name} after reconnect: #{inspect(err)}. Stopping."
+          "#{state.producer_module}: Failed to redeclare producer #{state.stream_name} after reconnect: #{inspect(err)}. Stopping, dropping #{:queue.len(state.pending)} held messages."
         )
 
         {:stop, err, %{state | id: nil}}
@@ -121,6 +132,23 @@ defmodule RabbitMQStream.Producer.LifeCycle do
     end
 
     {:noreply, state}
+  end
+
+  defp publish_now(state, message, filter_value) do
+    :ok = RabbitMQStream.Connection.publish(state.connection, state.id, state.sequence, message, filter_value)
+
+    %{state | sequence: state.sequence + 1}
+  end
+
+  defp flush_pending(state) do
+    state =
+      :queue.fold(
+        fn {message, filter_value}, state -> publish_now(state, message, filter_value) end,
+        state,
+        state.pending
+      )
+
+    %{state | pending: :queue.new()}
   end
 
   @impl GenServer

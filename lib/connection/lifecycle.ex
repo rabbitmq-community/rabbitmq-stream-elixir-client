@@ -190,7 +190,14 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     {:noreply, conn}
   end
 
+  # Their publisher/subscription ids belong to the dropped session, so replaying them after reopen would misfire.
   @impl GenServer
+  def handle_cast({command, _opts}, %Connection{reconnect_attempts: attempts} = conn)
+      when command in [:publish, :credit] and attempts > 0 do
+    Logger.debug("Discarding #{command} sent with an id from the dropped session")
+    {:noreply, conn}
+  end
+
   def handle_cast(action, %Connection{state: state} = conn) when state != :open do
     {:noreply, %{conn | request_buffer: :queue.in({:cast, action}, conn.request_buffer)}}
   end
@@ -408,14 +415,17 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     # Capture (accumulating, in case a second drop happens before recovery completes)
     # the pids so they can be notified to redeclare/resubscribe themselves once the
     # connection reopens.
-    targets =
-      (Map.values(conn.subscriptions) ++ Map.values(conn.producers) ++ conn.reconnect_targets)
+    attached =
+      (Map.values(conn.subscriptions) ++ Map.values(conn.producers))
       |> Enum.uniq()
       |> Enum.reject(&is_nil/1)
 
-    conn = %{discard_session(conn) | reconnect_targets: targets}
+    conn = %{discard_session(conn) | reconnect_targets: Enum.uniq(attached ++ conn.reconnect_targets)}
 
     if conn.options[:reconnect] do
+      # Lets them stop using this session's ids right away, not only once it reopens.
+      for pid <- attached, do: send(pid, {:connection_lost})
+
       # Keeps counting when a drop interrupts a reconnect attempt's handshake, so backoff still grows.
       schedule_reconnect(conn, conn.reconnect_attempts + 1)
     else

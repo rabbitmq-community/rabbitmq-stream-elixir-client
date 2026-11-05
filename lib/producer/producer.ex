@@ -225,7 +225,8 @@ defmodule RabbitMQStream.Producer do
     :stream_name,
     :sequence,
     :producer_module,
-    :id
+    :id,
+    pending: :queue.new()
   ]
 
   @type t :: %__MODULE__{
@@ -236,7 +237,8 @@ defmodule RabbitMQStream.Producer do
           stream_name: String.t(),
           sequence: non_neg_integer() | nil,
           id: String.t() | nil,
-          producer_module: module() | nil
+          producer_module: module() | nil,
+          pending: :queue.queue({binary(), String.t() | nil})
         }
 
   @type options :: [option()]
