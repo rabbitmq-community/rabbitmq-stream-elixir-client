@@ -84,6 +84,27 @@ defmodule RabbitMQStream.Producer.LifeCycle do
     {:stop, {:connection_down, reason}, state}
   end
 
+  # The connection dropped and reconnected in place (same pid, fresh socket/session).
+  # The broker forgot this producer entirely, so redeclare it from scratch -- reusing
+  # the same `reference_name` this process already owns, exactly as `handle_continue/2`
+  # does on first start -- and pick up a fresh `id`/`sequence` for the new session.
+  @impl GenServer
+  def handle_info({:connection_reconnected}, state) do
+    with {:ok, id} <-
+           RabbitMQStream.Connection.declare_producer(state.connection, state.stream_name, state.reference_name),
+         {:ok, sequence} <-
+           RabbitMQStream.Connection.query_producer_sequence(state.connection, state.stream_name, state.reference_name) do
+      {:noreply, %{state | id: id, sequence: sequence + 1}}
+    else
+      err ->
+        Logger.error(
+          "#{state.producer_module}: Failed to redeclare producer #{state.stream_name} after reconnect: #{inspect(err)}. Stopping."
+        )
+
+        {:stop, err, %{state | id: nil}}
+    end
+  end
+
   @impl GenServer
   def handle_info({:publish_confirm, publishing_ids}, state) do
     if function_exported?(state.producer_module, :handle_confirm, 1) do

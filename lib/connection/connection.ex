@@ -37,12 +37,32 @@ defmodule RabbitMQStream.Connection do
   * `heartbeat` - The heartbeat interval in seconds. Defaults to `60`.
   * `connect_timeout` - The TCP/TLS connect timeout in milliseconds. Defaults to `10_000`.
   * `lazy` - If `true`, the connection won't starting until explicitly calling `connect/1`. Defaults to `false`.
+  * `reconnect` - If `true`, a dropped TCP/TLS connection is automatically retried, with backoff,
+    and every producer/consumer attached to it is transparently redeclared/resubscribed once it
+    reopens. If `false`, a drop stops the connection process instead (with reason
+    `{:shutdown, {:connection_closed, reason}}`), so a supervisor can restart it. Defaults to `true`.
+  * `backoff` - The backoff strategy used between reconnect attempts after a drop. Either a
+    shorthand atom or a `{strategy, opts}` tuple. Defaults to `:exponential`
+    (`RabbitMQStream.Connection.Backoff.Exponential`).
+
+
+  # Connection states
+
+  A connection moves through `:closed` -> `:connecting` -> `:opening` -> `:open` on startup, and
+  `:closing` -> `:closed` on an orderly shutdown. If the underlying socket drops while `:open` (or
+  while reconnecting) and `reconnect` is enabled, it instead moves to `:reconnecting` and back to
+  `:connecting` -> `:opening` -> `:open` once a retry succeeds.
 
 
   # Consuming messages
   You can consume messages by calling `subscribe/5`:
 
       {:ok, _subscription_id} = MyApp.MyConnection.subscribe("stream-01", self(), :next, 999)
+
+  With `reconnect` enabled, a process that subscribed or declared a producer directly is sent
+  `{:connection_reconnected}` once a dropped connection reopens. Its old subscription/producer ids
+  are gone by then, so it must subscribe/declare again. `RabbitMQStream.Consumer` and
+  `RabbitMQStream.Producer` already do this for you.
 
 
 
@@ -548,10 +568,12 @@ defmodule RabbitMQStream.Connection do
           | {:heartbeat, non_neg_integer()}
           | {:connect_timeout, non_neg_integer()}
           | {:lazy, boolean()}
+          | {:reconnect, boolean()}
+          | {:backoff, RabbitMQStream.Connection.Backoff.t() | {RabbitMQStream.Connection.Backoff.t(), Keyword.t()}}
   @type t() :: %RabbitMQStream.Connection{
           options: connection_options,
           socket: :gen_tcp.socket(),
-          state: :closed | :connecting | :open | :closing,
+          state: :closed | :connecting | :opening | :open | :closing | :reconnecting,
           correlation_sequence: non_neg_integer(),
           producer_sequence: non_neg_integer(),
           subscriber_sequence: non_neg_integer(),
@@ -571,7 +593,10 @@ defmodule RabbitMQStream.Connection do
           user_buffer: :queue.queue({atom(), atom(), list({atom(), term()})}),
           # this should not be here. Should find a better way to return the close reason from the 'handler' module
           close_reason: String.t() | atom() | nil,
-          transport: RabbitMQStream.Connection.Transport.t()
+          transport: RabbitMQStream.Connection.Transport.t(),
+          reconnect_targets: [pid()],
+          reconnect_attempts: non_neg_integer(),
+          backoff: {RabbitMQStream.Connection.Backoff.t(), term()}
         }
   @enforce_keys [:transport, :options]
   defstruct [
@@ -594,6 +619,9 @@ defmodule RabbitMQStream.Connection do
     frames_buffer: RabbitMQStream.Message.Buffer.init(),
     internal_buffer: :queue.new(),
     user_buffer: :queue.new(),
+    reconnect_targets: [],
+    reconnect_attempts: 0,
+    backoff: nil,
     close_reason: nil
   ]
 end
