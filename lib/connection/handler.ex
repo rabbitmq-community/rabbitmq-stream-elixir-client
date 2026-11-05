@@ -86,7 +86,7 @@ defmodule RabbitMQStream.Connection.Handler do
       GenServer.reply(request, {:error, code})
     end
 
-    %{conn | state: :closing, close_reason: code}
+    %{conn | state: :closing, close_reason: code, connect_requests: []}
   end
 
   def handle_message(%Connection{} = conn, %Response{command: :credit, code: code})

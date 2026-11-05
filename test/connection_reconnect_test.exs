@@ -179,6 +179,34 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
     assert new_conn.reconnect_attempts == 4
   end
 
+  test "a reconnect handshake refused by the broker is retried rather than abandoning recovery" do
+    ref = make_ref()
+
+    conn =
+      conn(
+        state: :opening,
+        socket: :retry_socket,
+        reconnect_attempts: 2,
+        reconnect_targets: [self()],
+        connect_requests: [{self(), ref}],
+        backoff: Backoff.init(:exponential)
+      )
+
+    # sasl_authenticate response (0x8013), version 1, correlation id 1, code authentication_failure (0x08).
+    payload = <<0x8013::16, 1::16, 1::32, 0x08::16>>
+    frame = <<byte_size(payload)::32, payload::binary>>
+
+    assert {:noreply, new_conn} = Lifecycle.handle_info({:tcp, :retry_socket, frame}, conn)
+
+    assert new_conn.state == :reconnecting
+    assert new_conn.reconnect_attempts == 3
+    assert new_conn.reconnect_targets == [self()]
+    assert new_conn.socket == nil
+    assert new_conn.connect_requests == []
+    assert_receive {:closed, :retry_socket}
+    assert_receive {^ref, {:error, :authentication_failure}}
+  end
+
   test "a failed reconnect attempt reschedules with an incremented attempt count" do
     conn =
       conn(

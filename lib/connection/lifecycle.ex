@@ -371,6 +371,13 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     end
   end
 
+  # A reconnect handshake the broker refused (e.g. auth failure) is just another failed attempt.
+  defp handle_closing(%Connection{state: :closing, reconnect_attempts: attempt} = conn) when attempt > 0 do
+    conn
+    |> discard_session()
+    |> schedule_reconnect(attempt + 1)
+  end
+
   defp handle_closing(%Connection{state: :closing} = conn) do
     for request <- conn.connect_requests do
       GenServer.reply(request, {:error, :closed})
