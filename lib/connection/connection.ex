@@ -59,6 +59,11 @@ defmodule RabbitMQStream.Connection do
 
       {:ok, _subscription_id} = MyApp.MyConnection.subscribe("stream-01", self(), :next, 999)
 
+  With `reconnect` enabled, a process that subscribed or declared a producer directly is sent
+  `{:connection_reconnected}` once a dropped connection reopens. Its old subscription/producer ids
+  are gone by then, so it must subscribe/declare again. `RabbitMQStream.Consumer` and
+  `RabbitMQStream.Producer` already do this for you.
+
 
 
   # Configuration
