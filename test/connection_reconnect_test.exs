@@ -155,6 +155,15 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
     assert {:noreply, ^conn} = Lifecycle.handle_info({:heartbeat, :old_socket}, conn)
   end
 
+  test "late events from an already-replaced socket don't touch the current session" do
+    conn = conn(state: :connecting, socket: :new_socket, reconnect_attempts: 1, backoff: Backoff.init(:exponential))
+
+    assert {:noreply, ^conn} = Lifecycle.handle_info({:tcp_closed, :old_socket}, conn)
+    assert {:noreply, ^conn} = Lifecycle.handle_info({:tcp_error, :old_socket, :econnreset}, conn)
+    assert {:noreply, ^conn} = Lifecycle.handle_info({:tcp, :old_socket, <<0, 0, 0, 1>>}, conn)
+    refute_received {:closed, _}
+  end
+
   test "a failed reconnect attempt reschedules with an incremented attempt count" do
     conn =
       conn(

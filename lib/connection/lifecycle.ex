@@ -236,7 +236,7 @@ defmodule RabbitMQStream.Connection.Lifecycle do
   end
 
   @impl GenServer
-  def handle_info({key, _socket, data}, conn) when key in [:ssl, :tcp] do
+  def handle_info({key, socket, data}, %Connection{socket: socket} = conn) when key in [:ssl, :tcp] do
     {commands, frames_buffer} =
       data
       |> Buffer.incoming_data(conn.frames_buffer)
@@ -254,7 +254,7 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     |> handle_closing()
   end
 
-  def handle_info({key, _socket}, conn) when key in [:tcp_closed, :ssl_closed] do
+  def handle_info({key, socket}, %Connection{socket: socket} = conn) when key in [:tcp_closed, :ssl_closed] do
     if conn.state == :connecting do
       Logger.warning(
         "The connection was closed by the host, after the socket was already open, while running the authentication sequence. This could be caused by the server not having Stream Plugin active"
@@ -265,9 +265,18 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     |> handle_drop()
   end
 
-  def handle_info({key, _socket, reason}, conn) when key in [:tcp_error, :ssl_error] do
+  def handle_info({key, socket, reason}, %Connection{socket: socket} = conn) when key in [:tcp_error, :ssl_error] do
     %{conn | close_reason: reason}
     |> handle_drop()
+  end
+
+  # Late events from a socket a drop already discarded; never apply them to the new session.
+  def handle_info({key, _stale_socket, _data}, conn) when key in [:ssl, :tcp, :tcp_error, :ssl_error] do
+    {:noreply, conn}
+  end
+
+  def handle_info({key, _stale_socket}, conn) when key in [:tcp_closed, :ssl_closed] do
+    {:noreply, conn}
   end
 
   # Tagged with its session's socket, so a dropped session's timer dies out instead of writing to a dead socket.
