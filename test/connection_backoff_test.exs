@@ -39,6 +39,13 @@ defmodule RabbitMQStreamTest.ConnectionBackoff do
     end
   end
 
+  test "keeps returning :max long after the exponential step would overflow a float" do
+    state = Exponential.init(initial: 100, max: 400, multiplier: 2)
+
+    assert {delay, _state} = Exponential.next_delay(state, 5_000)
+    assert delay in 200..400
+  end
+
   test "the shorthand-atom dispatcher resolves :exponential" do
     assert {Exponential, %{initial: 1_000}} = Backoff.init(:exponential)
   end

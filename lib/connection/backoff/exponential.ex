@@ -2,8 +2,9 @@ defmodule RabbitMQStream.Connection.Backoff.Exponential do
   @behaviour RabbitMQStream.Connection.Backoff
 
   @moduledoc """
-  Exponential backoff strategy, with full jitter, used to space out reconnect
-  attempts after a connection drop. Retries indefinitely -- never gives up.
+  Exponential backoff strategy, with jitter, used to space out reconnect attempts after
+  a connection drop. Each delay is picked at random between half and all of the current
+  exponential step. Retries indefinitely -- never gives up.
 
   # Parameters
 
@@ -23,7 +24,13 @@ defmodule RabbitMQStream.Connection.Backoff.Exponential do
 
   @doc false
   def next_delay(%{initial: initial, max: max, multiplier: multiplier} = state, attempt) do
-    base = min(initial * :math.pow(multiplier, attempt - 1), max)
+    # :math.pow/2 raises on float overflow, which long enough retrying eventually reaches.
+    base =
+      try do
+        min(initial * :math.pow(multiplier, attempt - 1), max)
+      rescue
+        ArithmeticError -> max
+      end
 
     delay = trunc(base / 2 + :rand.uniform() * base / 2)
 
