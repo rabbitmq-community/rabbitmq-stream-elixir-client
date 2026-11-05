@@ -164,6 +164,21 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
     refute_received {:closed, _}
   end
 
+  test "a drop during a reconnect attempt's handshake keeps counting attempts" do
+    conn =
+      conn(
+        state: :connecting,
+        socket: :retry_socket,
+        reconnect_attempts: 3,
+        backoff: Backoff.init(:exponential)
+      )
+
+    assert {:noreply, new_conn} = Lifecycle.handle_info({:tcp_closed, :retry_socket}, conn)
+
+    assert new_conn.state == :reconnecting
+    assert new_conn.reconnect_attempts == 4
+  end
+
   test "a failed reconnect attempt reschedules with an incremented attempt count" do
     conn =
       conn(

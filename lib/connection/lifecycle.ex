@@ -398,10 +398,6 @@ defmodule RabbitMQStream.Connection.Lifecycle do
   end
 
   defp handle_drop(%Connection{} = conn) do
-    close_socket(conn)
-
-    # The broker-side ids behind these are gone with the socket -- clear them so a
-    # stray cast/call against a stale id doesn't silently misfire once reconnected.
     # Capture (accumulating, in case a second drop happens before recovery completes)
     # the pids so they can be notified to redeclare/resubscribe themselves once the
     # connection reopens.
@@ -410,6 +406,20 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       |> Enum.uniq()
       |> Enum.reject(&is_nil/1)
 
+    conn = %{discard_session(conn) | reconnect_targets: targets}
+
+    if conn.options[:reconnect] do
+      # Keeps counting when a drop interrupts a reconnect attempt's handshake, so backoff still grows.
+      schedule_reconnect(conn, conn.reconnect_attempts + 1)
+    else
+      give_up(conn)
+    end
+  end
+
+  # Tears down everything scoped to the current broker session.
+  defp discard_session(%Connection{} = conn) do
+    close_socket(conn)
+
     # In-flight protocol requests die with the TCP session -- there is nothing for a
     # future reconnect to resume them against, so fail them now rather than leaving
     # the caller hanging until (or unless) a reconnect eventually succeeds.
@@ -417,7 +427,9 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       GenServer.reply(client, {:error, {:closed, conn.close_reason}})
     end
 
-    conn = %{
+    # The broker-side ids behind these are gone with the socket -- clear them so a
+    # stray cast/call against a stale id doesn't silently misfire once reconnected.
+    %{
       conn
       | socket: nil,
         subscriptions: %{},
@@ -427,17 +439,6 @@ defmodule RabbitMQStream.Connection.Lifecycle do
         internal_buffer: :queue.new(),
         user_buffer: :queue.new()
     }
-
-    if conn.options[:reconnect] do
-      schedule_reconnect(%{conn | state: :reconnecting, reconnect_targets: targets}, 1)
-    else
-      for request <- conn.connect_requests do
-        GenServer.reply(request, {:error, :closed})
-      end
-
-      close_reason = conn.close_reason
-      {:stop, {:shutdown, {:connection_closed, close_reason}}, %{conn | connect_requests: []}}
-    end
   end
 
   defp schedule_reconnect(%Connection{} = conn, attempt) do
@@ -447,13 +448,17 @@ defmodule RabbitMQStream.Connection.Lifecycle do
         {:noreply, %{conn | backoff: backoff, reconnect_attempts: attempt, state: :reconnecting}}
 
       :stop ->
-        for request <- conn.connect_requests do
-          GenServer.reply(request, {:error, :closed})
-        end
-
-        close_reason = conn.close_reason
-        {:stop, {:shutdown, {:connection_closed, close_reason}}, %{conn | connect_requests: []}}
+        give_up(conn)
     end
+  end
+
+  defp give_up(%Connection{} = conn) do
+    for request <- conn.connect_requests do
+      GenServer.reply(request, {:error, :closed})
+    end
+
+    close_reason = conn.close_reason
+    {:stop, {:shutdown, {:connection_closed, close_reason}}, %{conn | connect_requests: []}}
   end
 
   defp close_socket(%Connection{socket: nil}), do: :ok
