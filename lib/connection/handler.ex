@@ -17,7 +17,7 @@ defmodule RabbitMQStream.Connection.Handler do
   def handle_message(%Connection{} = conn, %Request{command: :tune} = request) do
     Logger.debug("Tunning complete. Starting heartbeat timer.")
 
-    Process.send_after(self(), {:heartbeat}, conn.options[:heartbeat] * 1000)
+    Process.send_after(self(), {:heartbeat, conn.socket}, conn.options[:heartbeat] * 1000)
 
     options = Keyword.merge(conn.options, frame_max: request.data.frame_max, heartbeat: request.data.heartbeat)
 

@@ -149,6 +149,12 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
     assert {:noreply, ^conn} = Lifecycle.handle_info({:reconnect_attempt, 1}, conn)
   end
 
+  test "a heartbeat tick from a dropped session is ignored instead of writing to a dead socket" do
+    conn = conn(state: :reconnecting, socket: nil, reconnect_attempts: 1, backoff: Backoff.init(:exponential))
+
+    assert {:noreply, ^conn} = Lifecycle.handle_info({:heartbeat, :old_socket}, conn)
+  end
+
   test "a failed reconnect attempt reschedules with an incremented attempt count" do
     conn =
       conn(

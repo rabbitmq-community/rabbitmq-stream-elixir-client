@@ -270,8 +270,9 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     |> handle_drop()
   end
 
-  def handle_info({:heartbeat}, conn) do
-    Process.send_after(self(), {:heartbeat}, conn.options[:heartbeat] * 1000)
+  # Tagged with its session's socket, so a dropped session's timer dies out instead of writing to a dead socket.
+  def handle_info({:heartbeat, socket}, %Connection{socket: socket} = conn) do
+    Process.send_after(self(), {:heartbeat, socket}, conn.options[:heartbeat] * 1000)
 
     conn =
       conn
@@ -280,6 +281,8 @@ defmodule RabbitMQStream.Connection.Lifecycle do
 
     {:noreply, conn}
   end
+
+  def handle_info({:heartbeat, _stale_socket}, conn), do: {:noreply, conn}
 
   def handle_info(:flush_request_buffer, %Connection{state: :closed} = conn) do
     Logger.warning("Connection is closed. Ignoring flush buffer request.")
