@@ -62,6 +62,38 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
     assert_receive {^ref, {:error, {:closed, :tcp_closed}}}
   end
 
+  test "a drop tells attached producers/consumers right away, not only once it reopens" do
+    consumer = spawn(fn -> Process.sleep(:infinity) end)
+    producer = self()
+
+    conn =
+      conn(
+        state: :open,
+        socket: :fake_socket,
+        subscriptions: %{1 => consumer},
+        producers: %{2 => producer},
+        backoff: Backoff.init(:exponential)
+      )
+
+    :erlang.trace(consumer, true, [:receive])
+    assert {:noreply, _new_conn} = Lifecycle.handle_info({:tcp_closed, :fake_socket}, conn)
+
+    assert_receive {:connection_lost}
+    assert_receive {:trace, ^consumer, :receive, {:connection_lost}}
+  end
+
+  test "publish/credit sent with a dropped session's ids are discarded, not replayed after reopen" do
+    conn = conn(state: :reconnecting, reconnect_attempts: 1, backoff: Backoff.init(:exponential))
+
+    assert {:noreply, ^conn} = Lifecycle.handle_cast({:publish, producer_id: 1, publishing_id: 5}, conn)
+    assert {:noreply, ^conn} = Lifecycle.handle_cast({:credit, subscription_id: 1, credit: 1}, conn)
+
+    # Before the first open there's no dropped session: these are still queued as before.
+    fresh = conn(state: :connecting, backoff: Backoff.init(:exponential))
+    assert {:noreply, queued} = Lifecycle.handle_cast({:credit, subscription_id: 1, credit: 1}, fresh)
+    assert :queue.len(queued.request_buffer) == 1
+  end
+
   test "a drop with reconnect: false stops the connection in an orderly way" do
     ref = make_ref()
     from = {self(), ref}

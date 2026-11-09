@@ -11,10 +11,10 @@
 #     `sudo lsof -ti tcp:5552 -sTCP:ESTABLISHED | xargs -I{} sudo kill -9 {}` (closes the
 #     socket from the OS level; the broker sees a normal disconnect)
 #
-# Watch the "Connection state" line flip to `reconnecting` and back to `open`, and note that
-# messages published *while* disconnected are not delivered (`publish/3` is fire-and-forget and
-# the in-flight publisher id becomes stale mid-drop -- this is a known, documented gap, tracked
-# alongside Priority 3's backpressure work) -- but publishing resumes normally once reconnected.
+# Watch the "Connection state" line flip to `reconnecting` and back to `open`. Messages published
+# *while* disconnected are held by the producer and sent once it has redeclared itself, so they
+# arrive after recovery instead of being lost. (A message already sent but not yet confirmed at
+# the moment of the drop can still be lost.)
 #
 # Terminate the example itself with Ctrl+C (this is a plain `mix run` script, so like any other
 # long-running Elixir/Erlang program, Ctrl+C brings up the VM's BREAK menu -- press `a` + Enter,

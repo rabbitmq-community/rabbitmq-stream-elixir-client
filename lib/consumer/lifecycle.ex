@@ -168,6 +168,10 @@ defmodule RabbitMQStream.Consumer.LifeCycle do
     {:stop, {:connection_down, reason}, state}
   end
 
+  # Resubscribing waits for `{:connection_reconnected}`; the connection discards any credit sent meanwhile.
+  @impl true
+  def handle_info({:connection_lost}, state), do: {:noreply, state}
+
   # The connection dropped and reconnected in place (same pid, fresh socket/session).
   # The broker forgot this subscription entirely, so resubscribe from scratch, using
   # the last tracked offset as the resume point (falling back to the original

@@ -39,6 +39,21 @@ defmodule RabbitMQStreamTest.Producer do
     def handle_confirm(publishing_ids) do
       send(Process.whereis(:producer_confirm_test_listener), {:confirmed, publishing_ids})
     end
+
+    @impl true
+    def handle_publish_error(errors) do
+      send(Process.whereis(:producer_confirm_test_listener), {:publish_error, errors})
+    end
+  end
+
+  # Generous timeout for slow CI runners; a broker rejection fails right away with its reason.
+  defp assert_confirmed do
+    receive do
+      {:confirmed, [_publishing_id]} -> :ok
+      {:publish_error, errors} -> flunk("Publish rejected by the broker: #{inspect(errors)}")
+    after
+      5_000 -> flunk("No publish confirm within 5s")
+    end
   end
 
   defmodule CustomRoutingProducer do
@@ -164,7 +179,7 @@ defmodule RabbitMQStreamTest.Producer do
 
     ConfirmingProducer.publish(inspect(%{message: "Hello, world!"}))
 
-    assert_receive {:confirmed, [_publishing_id]}, 1000
+    assert_confirmed()
 
     SupervisedConnection.delete_stream(@stream)
   end
@@ -181,7 +196,7 @@ defmodule RabbitMQStreamTest.Producer do
       )
 
     ConfirmingProducer.publish(inspect(%{message: "before the drop"}))
-    assert_receive {:confirmed, [_publishing_id]}, 1000
+    assert_confirmed()
 
     %{connection: conn} = :sys.get_state(Process.whereis(ConfirmingProducer))
     %Connection{socket: socket} = :sys.get_state(conn)
@@ -196,7 +211,39 @@ defmodule RabbitMQStreamTest.Producer do
     # Proves the producer actually redeclared itself against the new session (not
     # just that local state changed): a stale, pre-drop producer_id would not confirm.
     ConfirmingProducer.publish(inspect(%{message: "after the drop"}))
-    assert_receive {:confirmed, [_publishing_id]}, 1000
+    assert_confirmed()
+
+    SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "producer-test-06"
+  @reference_name "producer-test-reference-06"
+  test "holds messages published while reconnecting and sends them once redeclared" do
+    Process.register(self(), :producer_confirm_test_listener)
+
+    {:ok, producer} = ConfirmingProducer.start_link(reference_name: @reference_name, stream_name: @stream)
+
+    ConfirmingProducer.publish(inspect(%{message: "before the drop"}))
+    assert_confirmed()
+
+    %{connection: conn} = :sys.get_state(producer)
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+    # Processed right after the drop, before its first reconnect attempt fires: keeps it reconnecting.
+    :sys.suspend(conn)
+
+    assert %RabbitMQStream.Producer{id: nil} = :sys.get_state(producer)
+
+    ConfirmingProducer.publish(inspect(%{message: "while reconnecting"}))
+    assert :queue.len(:sys.get_state(producer).pending) == 1
+    refute_receive {:confirmed, _}, 200
+
+    :sys.resume(conn)
+    assert :ok = SupervisedConnection.connect(5_000)
+
+    assert_confirmed()
+    assert :queue.is_empty(:sys.get_state(producer).pending)
 
     SupervisedConnection.delete_stream(@stream)
   end
