@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Breaking Changes
+
+- **Automatic reconnection is now enabled by default.** A dropped TCP/TLS connection previously
+  left `RabbitMQStream.Connection` in a broken state (`:open` with a dead socket) until the next
+  write crashed the process; it now reconnects in place with backoff, and every producer/consumer
+  attached to it is transparently redeclared/resubscribed once the connection reopens. Applications
+  relying on the previous crash-then-supervisor-restart cycle (e.g. to reset external state) should
+  pass `reconnect: false`, which now stops the connection in an orderly way instead
+  (`{:shutdown, {:connection_closed, reason}}`) for a supervisor to restart, rather than crashing
+  with a `MatchError` on the next write.
+- New `:reconnect` (default `true`) and `:backoff` (default `:exponential`) connection options.
+- New `:reconnecting` connection state.
+
 ## 0.4.2
 
 Bug fixes

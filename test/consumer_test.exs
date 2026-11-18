@@ -1,6 +1,6 @@
 defmodule RabbitMQStreamTest.Consumer do
   use ExUnit.Case, async: false
-  alias RabbitMQStream.OsirisChunk
+  alias RabbitMQStream.{Connection, OsirisChunk}
 
   @moduletag :v3_11
   @moduletag :v3_12
@@ -77,7 +77,9 @@ defmodule RabbitMQStreamTest.Consumer do
       end
     end)
 
-    {:ok, _conn} = SupervisedConnection.start_link(host: "localhost", vhost: "/")
+    {:ok, _conn} =
+      SupervisedConnection.start_link(host: "localhost", vhost: "/", backoff: {:exponential, initial: 10, max: 50})
+
     :ok = SupervisedConnection.connect()
 
     {:ok, _conn} = SupervisedConnection2.start_link(host: "localhost", vhost: "/")
@@ -247,5 +249,46 @@ defmodule RabbitMQStreamTest.Consumer do
 
     assert_receive {:message, %{"message" => "first"}}, 500
     refute_receive {:message, %{"message" => "second"}}, 500
+  end
+
+  @stream "consumer-test-stream-11"
+  @reference_name "reference-11"
+  test "resubscribes and keeps delivering after its connection recovers from a drop" do
+    {:ok, _producer} =
+      SupervisorProducer2.start_link(reference_name: @reference_name, stream_name: @stream)
+
+    {:ok, _subscriber} =
+      Consumer.start_link(
+        initial_offset: :next,
+        stream_name: @stream,
+        private: self(),
+        offset_tracking: [count: [store_after: 1]]
+      )
+
+    Consumer.get_credits()
+
+    message1 = %{"message" => "before the drop"}
+    SupervisorProducer2.publish(message1)
+    assert_receive {:message, ^message1}, 500
+
+    %{connection: conn} = :sys.get_state(Process.whereis(Consumer))
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+
+    # Blocks until the connection reopens (see connection_test.exs), which happens
+    # strictly after both this consumer's and the producer's `{:connection_reconnected}`
+    # notifications were already sent (handler.ex notifies before replying to
+    # `connect/1` callers).
+    assert :ok = SupervisedConnection.connect(5_000)
+
+    # Proves the consumer actually resubscribed against the new session (not just
+    # that local state changed): a stale, pre-drop subscription_id would receive
+    # nothing here.
+    message2 = %{"message" => "after the drop"}
+    SupervisorProducer2.publish(message2)
+    assert_receive {:message, ^message2}, 500
+
+    SupervisedConnection.delete_stream(@stream)
   end
 end

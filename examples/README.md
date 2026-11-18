@@ -21,3 +21,4 @@ mix run examples/<folder>/<file>.exs
 - [Super Stream](./super_stream) - Super Stream example with Single Active Consumer.
 - [Manual Credit](./manual_credit/manual_credit.exs) - Manual credit/flow-control strategy example.
 - [Deduplication](./deduplication/deduplication.exs) - Message deduplication via a stable producer `reference_name`.
+- [Automatic Reconnection](./auto_reconnection/auto_reconnection.exs) - Continuously publishes/consumes so you can watch the connection recover live from a dropped TCP connection.
