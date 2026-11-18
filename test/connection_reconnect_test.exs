@@ -28,6 +28,14 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
     def send(_socket, _data), do: :ok
   end
 
+  # Allows one retry, then gives up.
+  defmodule GiveUpBackoff do
+    @behaviour RabbitMQStream.Connection.Backoff
+    def init(_opts), do: nil
+    def next_delay(state, 1), do: {60_000, state}
+    def next_delay(_state, _attempt), do: :stop
+  end
+
   defp conn(opts) do
     struct(
       %Connection{transport: FakeTransport, options: [reconnect: true, host: "localhost", port: 5552]},
@@ -251,5 +259,28 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
 
     assert new_conn.state == :reconnecting
     assert new_conn.reconnect_attempts == 2
+  end
+
+  test "a backoff strategy returning :stop ends recovery with an orderly stop" do
+    ref = make_ref()
+
+    conn =
+      conn(
+        state: :open,
+        socket: :fake_socket,
+        backoff: Backoff.init(GiveUpBackoff)
+      )
+
+    assert {:noreply, reconnecting} = Lifecycle.handle_info({:tcp_closed, :fake_socket}, conn)
+    assert reconnecting.state == :reconnecting
+
+    # A caller waiting on connect/1 while reconnecting gets an answer when recovery gives up.
+    reconnecting = %{reconnecting | connect_requests: [{self(), ref}]}
+
+    assert {:stop, {:shutdown, {:connection_closed, :tcp_closed}}, final_conn} =
+             Lifecycle.handle_info({:reconnect_attempt, 1}, reconnecting)
+
+    assert final_conn.connect_requests == []
+    assert_receive {^ref, {:error, :closed}}
   end
 end

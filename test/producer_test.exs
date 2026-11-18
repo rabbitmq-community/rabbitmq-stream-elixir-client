@@ -1,5 +1,6 @@
 defmodule RabbitMQStreamTest.Producer do
   use ExUnit.Case, async: false
+  import ExUnit.CaptureLog
   alias RabbitMQStream.Connection
 
   @moduletag :v3_11
@@ -281,6 +282,39 @@ defmodule RabbitMQStreamTest.Producer do
     assert collect_entries(4) == ["before the drop" | held]
 
     SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "producer-test-08"
+  @reference_name "producer-test-reference-08"
+  test "stops, dropping held messages, when it can't redeclare itself after a reconnect" do
+    Process.flag(:trap_exit, true)
+    SupervisedConnection.delete_stream(@stream)
+
+    {:ok, producer} = ConfirmingProducer.start_link(reference_name: @reference_name, stream_name: @stream)
+    monitor = Process.monitor(producer)
+
+    %{connection: conn} = :sys.get_state(producer)
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+    :sys.suspend(conn)
+
+    ConfirmingProducer.publish("held")
+
+    # Deleted while reconnecting, so the redeclare fails.
+    {:ok, other} = Connection.start_link(host: "localhost", vhost: "/")
+    :ok = Connection.connect(other)
+    :ok = Connection.delete_stream(other, @stream)
+    GenServer.stop(other)
+
+    log =
+      capture_log(fn ->
+        :sys.resume(conn)
+        assert :ok = SupervisedConnection.connect(5_000)
+        assert_receive {:DOWN, ^monitor, :process, ^producer, {:error, _}}, 5_000
+      end)
+
+    assert log =~ "dropping 1 held messages"
   end
 
   defp collect_confirms(count, acc \\ [])

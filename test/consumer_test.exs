@@ -1,5 +1,6 @@
 defmodule RabbitMQStreamTest.Consumer do
   use ExUnit.Case, async: false
+  import ExUnit.CaptureLog
   alias RabbitMQStream.{Connection, OsirisChunk}
 
   @moduletag :v3_11
@@ -372,5 +373,34 @@ defmodule RabbitMQStreamTest.Consumer do
     refute_receive {:message, ^message1}, 500
 
     SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "consumer-test-stream-14"
+  test "stops when it can't resubscribe after a reconnect" do
+    Process.flag(:trap_exit, true)
+    SupervisedConnection2.delete_stream(@stream)
+    SupervisedConnection2.create_stream(@stream)
+
+    {:ok, consumer} = Consumer.start_link(initial_offset: :next, stream_name: @stream, private: self())
+    monitor = Process.monitor(consumer)
+    Consumer.get_credits()
+
+    %{connection: conn} = :sys.get_state(consumer)
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+    :sys.suspend(conn)
+
+    # Deleted while reconnecting, so the resubscribe fails.
+    :ok = SupervisedConnection2.delete_stream(@stream)
+
+    log =
+      capture_log(fn ->
+        :sys.resume(conn)
+        assert :ok = SupervisedConnection.connect(5_000)
+        assert_receive {:DOWN, ^monitor, :process, ^consumer, {:error, _}}, 5_000
+      end)
+
+    assert log =~ "Failed to resubscribe to #{@stream}"
   end
 end
