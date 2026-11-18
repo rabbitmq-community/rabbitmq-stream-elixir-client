@@ -1,5 +1,6 @@
 defmodule RabbitMQStreamTest.Producer do
   use ExUnit.Case, async: false
+  import ExUnit.CaptureLog
   alias RabbitMQStream.Connection
 
   @moduletag :v3_11
@@ -246,5 +247,96 @@ defmodule RabbitMQStreamTest.Producer do
     assert :queue.is_empty(:sys.get_state(producer).pending)
 
     SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "producer-test-07"
+  @reference_name "producer-test-reference-07"
+  test "sends several held messages in order, under the next publishing ids, once redeclared" do
+    # Reads the stream back from :first, so leftovers from a failed run would break it.
+    SupervisedConnection.delete_stream(@stream)
+    Process.register(self(), :producer_confirm_test_listener)
+
+    {:ok, producer} = ConfirmingProducer.start_link(reference_name: @reference_name, stream_name: @stream)
+
+    ConfirmingProducer.publish("before the drop")
+    [before_id] = collect_confirms(1)
+
+    %{connection: conn} = :sys.get_state(producer)
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+    :sys.suspend(conn)
+
+    held = ["held 1", "held 2", "held 3"]
+    for message <- held, do: ConfirmingProducer.publish(message)
+    assert :queue.len(:sys.get_state(producer).pending) == 3
+
+    :sys.resume(conn)
+    assert :ok = SupervisedConnection.connect(5_000)
+
+    # Ids at or below the broker's last sequence would be deduplicated away.
+    assert collect_confirms(3) == Enum.to_list((before_id + 1)..(before_id + 3))
+
+    # A confirm alone doesn't prove the message was stored, so read the stream back.
+    {:ok, _} = SupervisedConnection.subscribe(@stream, self(), :first, 10)
+    assert collect_entries(4) == ["before the drop" | held]
+
+    SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "producer-test-08"
+  @reference_name "producer-test-reference-08"
+  test "stops, dropping held messages, when it can't redeclare itself after a reconnect" do
+    Process.flag(:trap_exit, true)
+    SupervisedConnection.delete_stream(@stream)
+
+    {:ok, producer} = ConfirmingProducer.start_link(reference_name: @reference_name, stream_name: @stream)
+    monitor = Process.monitor(producer)
+
+    %{connection: conn} = :sys.get_state(producer)
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+    :sys.suspend(conn)
+
+    ConfirmingProducer.publish("held")
+
+    # Deleted while reconnecting, so the redeclare fails.
+    {:ok, other} = Connection.start_link(host: "localhost", vhost: "/")
+    :ok = Connection.connect(other)
+    :ok = Connection.delete_stream(other, @stream)
+    GenServer.stop(other)
+
+    log =
+      capture_log(fn ->
+        :sys.resume(conn)
+        assert :ok = SupervisedConnection.connect(5_000)
+        assert_receive {:DOWN, ^monitor, :process, ^producer, {:error, _}}, 5_000
+      end)
+
+    assert log =~ "dropping 1 held messages"
+  end
+
+  defp collect_confirms(count, acc \\ [])
+  defp collect_confirms(count, acc) when length(acc) >= count, do: Enum.sort(acc)
+
+  defp collect_confirms(count, acc) do
+    receive do
+      {:confirmed, ids} -> collect_confirms(count, acc ++ ids)
+      {:publish_error, errors} -> flunk("Publish rejected by the broker: #{inspect(errors)}")
+    after
+      5_000 -> flunk("Got #{length(acc)} of #{count} confirms within 5s")
+    end
+  end
+
+  defp collect_entries(count, acc \\ [])
+  defp collect_entries(count, acc) when length(acc) >= count, do: acc
+
+  defp collect_entries(count, acc) do
+    receive do
+      {:deliver, %{osiris_chunk: %{data_entries: entries}}} -> collect_entries(count, acc ++ entries)
+    after
+      5_000 -> flunk("Read #{length(acc)} of #{count} messages within 5s: #{inspect(acc)}")
+    end
   end
 end

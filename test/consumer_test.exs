@@ -1,5 +1,6 @@
 defmodule RabbitMQStreamTest.Consumer do
   use ExUnit.Case, async: false
+  import ExUnit.CaptureLog
   alias RabbitMQStream.{Connection, OsirisChunk}
 
   @moduletag :v3_11
@@ -31,6 +32,20 @@ defmodule RabbitMQStreamTest.Consumer do
   defmodule SupervisorProducer2 do
     use RabbitMQStream.Producer,
       connection: SupervisedConnection,
+      serializer: Jason
+
+    @impl true
+    def before_start(_opts, state) do
+      RabbitMQStream.Connection.create_stream(state.connection, state.stream_name)
+
+      state
+    end
+  end
+
+  # Publishes over a connection the tests don't drop.
+  defmodule SupervisorProducer3 do
+    use RabbitMQStream.Producer,
+      connection: SupervisedConnection2,
       serializer: Jason
 
     @impl true
@@ -290,5 +305,102 @@ defmodule RabbitMQStreamTest.Consumer do
     assert_receive {:message, ^message2}, 500
 
     SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "consumer-test-stream-12"
+  @reference_name "reference-12"
+  test "resumes from its last offset after a drop, without skipping or redelivering" do
+    SupervisedConnection2.delete_stream(@stream)
+    SupervisedConnection2.create_stream(@stream)
+    {:ok, _producer} = SupervisorProducer3.start_link(reference_name: @reference_name, stream_name: @stream)
+    {:ok, _subscriber} = Consumer.start_link(initial_offset: :next, stream_name: @stream, private: self())
+    Consumer.get_credits()
+
+    message1 = %{"message" => "before the drop"}
+    SupervisorProducer3.publish(message1)
+    assert_receive {:message, ^message1}, 500
+
+    %{connection: conn} = :sys.get_state(Process.whereis(Consumer))
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+    :sys.suspend(conn)
+
+    # Published while the consumer's connection is down; a resubscribe at :next would miss it.
+    {:ok, _} = SupervisedConnection2.subscribe(@stream, self(), :next, 10)
+    message2 = %{"message" => "while reconnecting"}
+    SupervisorProducer3.publish(message2)
+    encoded2 = Jason.encode!(message2)
+    assert_receive {:deliver, %{osiris_chunk: %OsirisChunk{data_entries: [^encoded2]}}}, 1_000
+
+    :sys.resume(conn)
+    assert :ok = SupervisedConnection.connect(5_000)
+
+    assert_receive {:message, ^message2}, 1_000
+    refute_receive {:message, ^message1}, 500
+
+    SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "consumer-test-stream-13"
+  @reference_name "reference-13"
+  test "falls back to its initial offset after a drop when nothing was delivered yet" do
+    SupervisedConnection2.delete_stream(@stream)
+    SupervisedConnection2.create_stream(@stream)
+    {:ok, _producer} = SupervisorProducer3.start_link(reference_name: @reference_name, stream_name: @stream)
+
+    {:ok, _} = SupervisedConnection2.subscribe(@stream, self(), :next, 10)
+    message1 = %{"message" => "before the consumer started"}
+    SupervisorProducer3.publish(message1)
+    encoded1 = Jason.encode!(message1)
+    assert_receive {:deliver, %{osiris_chunk: %OsirisChunk{data_entries: [^encoded1]}}}, 1_000
+
+    {:ok, _subscriber} = Consumer.start_link(initial_offset: :next, stream_name: @stream, private: self())
+    Consumer.get_credits()
+
+    %{connection: conn} = :sys.get_state(Process.whereis(Consumer))
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+    assert :ok = SupervisedConnection.connect(5_000)
+    # Waits for the resubscribe, so message2 lands after it.
+    Consumer.get_credits()
+
+    # Resuming at offset 0 instead of :next would replay message1.
+    message2 = %{"message" => "after the drop"}
+    SupervisorProducer3.publish(message2)
+    assert_receive {:message, ^message2}, 1_000
+    refute_receive {:message, ^message1}, 500
+
+    SupervisedConnection.delete_stream(@stream)
+  end
+
+  @stream "consumer-test-stream-14"
+  test "stops when it can't resubscribe after a reconnect" do
+    Process.flag(:trap_exit, true)
+    SupervisedConnection2.delete_stream(@stream)
+    SupervisedConnection2.create_stream(@stream)
+
+    {:ok, consumer} = Consumer.start_link(initial_offset: :next, stream_name: @stream, private: self())
+    monitor = Process.monitor(consumer)
+    Consumer.get_credits()
+
+    %{connection: conn} = :sys.get_state(consumer)
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    send(conn, {:tcp_closed, socket})
+    :sys.suspend(conn)
+
+    # Deleted while reconnecting, so the resubscribe fails.
+    :ok = SupervisedConnection2.delete_stream(@stream)
+
+    log =
+      capture_log(fn ->
+        :sys.resume(conn)
+        assert :ok = SupervisedConnection.connect(5_000)
+        assert_receive {:DOWN, ^monitor, :process, ^consumer, {:error, _}}, 5_000
+      end)
+
+    assert log =~ "Failed to resubscribe to #{@stream}"
   end
 end
