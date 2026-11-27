@@ -28,6 +28,14 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
     def send(_socket, _data), do: :ok
   end
 
+  # A transport whose connect always succeeds, for a broker that accepts the socket.
+  defmodule AcceptingTransport do
+    @behaviour RabbitMQStream.Connection.Transport
+    def connect(_options), do: {:ok, :accepted_socket}
+    def close(_socket), do: :ok
+    def send(_socket, _data), do: :ok
+  end
+
   # Allows one retry, then gives up.
   defmodule GiveUpBackoff do
     @behaviour RabbitMQStream.Connection.Backoff
@@ -282,5 +290,33 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
 
     assert final_conn.connect_requests == []
     assert_receive {^ref, {:error, :closed}}
+  end
+
+  test "a reconnect attempt that never finishes its handshake times out and is retried" do
+    conn =
+      conn(
+        state: :reconnecting,
+        reconnect_attempts: 2,
+        transport: AcceptingTransport,
+        options: [reconnect: true, host: "localhost", port: 5552, connect_timeout: 0],
+        backoff: Backoff.init(:exponential)
+      )
+
+    assert {:noreply, connecting} = Lifecycle.handle_info({:reconnect_attempt, 2}, conn)
+    assert connecting.state == :connecting
+    assert_receive {:handshake_timeout, :accepted_socket} = timeout
+
+    assert {:noreply, retrying} = Lifecycle.handle_info(timeout, connecting)
+    assert retrying.state == :reconnecting
+    assert retrying.reconnect_attempts == 3
+    assert retrying.socket == nil
+  end
+
+  test "a handshake timeout is ignored once that attempt opened or its socket was replaced" do
+    open = conn(state: :open, socket: :accepted_socket, backoff: Backoff.init(:exponential))
+    assert {:noreply, ^open} = Lifecycle.handle_info({:handshake_timeout, :accepted_socket}, open)
+
+    replaced = conn(state: :connecting, socket: :new_socket, reconnect_attempts: 3, backoff: Backoff.init(:exponential))
+    assert {:noreply, ^replaced} = Lifecycle.handle_info({:handshake_timeout, :accepted_socket}, replaced)
   end
 end

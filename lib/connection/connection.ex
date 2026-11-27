@@ -35,7 +35,8 @@ defmodule RabbitMQStream.Connection do
   * `vhost` - The virtual host to use. Defaults to `/`.
   * `frame_max` - The maximum frame size in Bytes. Defaults to `1_048_576`.
   * `heartbeat` - The heartbeat interval in seconds. Defaults to `60`.
-  * `connect_timeout` - The TCP/TLS connect timeout in milliseconds. Defaults to `10_000`.
+  * `connect_timeout` - The TCP/TLS connect timeout in milliseconds. Also bounds the handshake of
+    each reconnect attempt. Defaults to `10_000`.
   * `lazy` - If `true`, the connection won't starting until explicitly calling `connect/1`. Defaults to `false`.
   * `reconnect` - If `true`, a dropped TCP/TLS connection is automatically retried, with backoff,
     and every producer/consumer attached to it is transparently redeclared/resubscribed once it
