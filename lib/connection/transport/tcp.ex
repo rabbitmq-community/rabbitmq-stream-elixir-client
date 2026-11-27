@@ -7,7 +7,7 @@ defmodule RabbitMQStream.Connection.Transport.TCP do
            :gen_tcp.connect(
              String.to_charlist(options[:host]),
              options[:port],
-             [:binary, active: true],
+             [:binary, active: true, send_timeout: options[:send_timeout], send_timeout_close: true],
              options[:connect_timeout]
            ),
          :ok <- :gen_tcp.controlling_process(socket, self()) do

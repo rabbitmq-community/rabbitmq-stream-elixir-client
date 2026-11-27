@@ -36,6 +36,8 @@ defmodule RabbitMQStream.Connection do
   * `frame_max` - The maximum frame size in Bytes. Defaults to `1_048_576`.
   * `heartbeat` - The heartbeat interval in seconds. Defaults to `60`.
   * `connect_timeout` - The TCP/TLS connect timeout in milliseconds. Defaults to `10_000`.
+  * `send_timeout` - How long, in milliseconds, a write to the socket may block before the
+    connection is treated as dropped. Defaults to `10_000`.
   * `lazy` - If `true`, the connection won't starting until explicitly calling `connect/1`. Defaults to `false`.
   * `reconnect` - If `true`, a dropped TCP/TLS connection is automatically retried, with backoff,
     and every producer/consumer attached to it is transparently redeclared/resubscribed once it
@@ -568,6 +570,7 @@ defmodule RabbitMQStream.Connection do
           | {:frame_max, non_neg_integer()}
           | {:heartbeat, non_neg_integer()}
           | {:connect_timeout, non_neg_integer()}
+          | {:send_timeout, non_neg_integer()}
           | {:lazy, boolean()}
           | {:reconnect, boolean()}
           | {:backoff, RabbitMQStream.Connection.Backoff.t() | {RabbitMQStream.Connection.Backoff.t(), Keyword.t()}}

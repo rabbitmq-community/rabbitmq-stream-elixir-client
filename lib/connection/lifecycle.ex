@@ -26,6 +26,7 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       |> Keyword.put_new(:frame_max, 1_048_576)
       |> Keyword.put_new(:heartbeat, 60)
       |> Keyword.put_new(:connect_timeout, 10_000)
+      |> Keyword.put_new(:send_timeout, 10_000)
       |> Keyword.put_new(:transport, :tcp)
       |> Keyword.put_new(:reconnect, true)
       |> Keyword.put_new(:backoff, :exponential)
@@ -272,13 +273,14 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     |> handle_drop()
   end
 
-  def handle_info({key, socket, reason}, %Connection{socket: socket} = conn) when key in [:tcp_error, :ssl_error] do
+  def handle_info({key, socket, reason}, %Connection{socket: socket} = conn)
+      when key in [:tcp_error, :ssl_error, :send_error] do
     %{conn | close_reason: reason}
     |> handle_drop()
   end
 
   # Late events from a socket a drop already discarded; never apply them to the new session.
-  def handle_info({key, _stale_socket, _data}, conn) when key in [:ssl, :tcp, :tcp_error, :ssl_error] do
+  def handle_info({key, _stale_socket, _data}, conn) when key in [:ssl, :tcp, :tcp_error, :ssl_error, :send_error] do
     {:noreply, conn}
   end
 
@@ -539,7 +541,7 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       |> Message.new_request(command, opts)
       |> Encoder.encode()
 
-    :ok = conn.transport.send(conn.socket, frame)
+    transmit(conn, frame)
 
     %{
       conn
@@ -553,8 +555,16 @@ defmodule RabbitMQStream.Connection.Lifecycle do
       |> Message.new_response(command, opts)
       |> Encoder.encode()
 
-    :ok = conn.transport.send(conn.socket, frame)
+    transmit(conn, frame)
 
     conn
+  end
+
+  # Handled as a drop via a message, since callers here only thread `conn` through.
+  defp transmit(%Connection{} = conn, frame) do
+    case conn.transport.send(conn.socket, frame) do
+      :ok -> :ok
+      {:error, reason} -> send(self(), {:send_error, conn.socket, reason})
+    end
   end
 end

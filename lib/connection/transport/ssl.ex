@@ -7,7 +7,12 @@ defmodule RabbitMQStream.Connection.Transport.SSL do
            :ssl.connect(
              String.to_charlist(options[:host]),
              options[:port],
-             Keyword.merge(options[:ssl_opts], binary: true, active: true),
+             Keyword.merge(options[:ssl_opts],
+               binary: true,
+               active: true,
+               send_timeout: options[:send_timeout],
+               send_timeout_close: true
+             ),
              options[:connect_timeout]
            ),
          :ok <- :ssl.controlling_process(socket, self()) do

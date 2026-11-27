@@ -28,6 +28,14 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
     def send(_socket, _data), do: :ok
   end
 
+  # A transport whose writes fail, as on a socket the peer already closed.
+  defmodule FailingSendTransport do
+    @behaviour RabbitMQStream.Connection.Transport
+    def connect(_options), do: {:error, :econnrefused}
+    def close(_socket), do: :ok
+    def send(_socket, _data), do: {:error, :closed}
+  end
+
   # Allows one retry, then gives up.
   defmodule GiveUpBackoff do
     @behaviour RabbitMQStream.Connection.Backoff
@@ -282,5 +290,43 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
 
     assert final_conn.connect_requests == []
     assert_receive {^ref, {:error, :closed}}
+  end
+
+  test "a failed write is handled as a drop instead of crashing the connection" do
+    conn =
+      conn(state: :open, socket: :fake_socket, transport: FailingSendTransport, backoff: Backoff.init(:exponential))
+
+    assert {:noreply, _conn} = Lifecycle.handle_cast({:credit, subscription_id: 1, credit: 1}, conn)
+    assert_receive {:send_error, :fake_socket, :closed} = message
+
+    assert {:noreply, new_conn} = Lifecycle.handle_info(message, conn)
+    assert new_conn.state == :reconnecting
+    assert new_conn.close_reason == :closed
+  end
+
+  test "a write failure reported for an already-replaced socket is ignored" do
+    conn = conn(state: :connecting, socket: :new_socket, reconnect_attempts: 1, backoff: Backoff.init(:exponential))
+
+    assert {:noreply, ^conn} = Lifecycle.handle_info({:send_error, :old_socket, :closed}, conn)
+  end
+
+  test "a write to a peer that stops reading gives up after send_timeout" do
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, recbuf: 4096])
+    {:ok, port} = :inet.port(listener)
+
+    {:ok, socket} =
+      RabbitMQStream.Connection.Transport.TCP.connect(
+        host: "localhost",
+        port: port,
+        connect_timeout: 1_000,
+        send_timeout: 100
+      )
+
+    {:ok, _peer} = :gen_tcp.accept(listener)
+
+    chunk = :binary.copy(<<0>>, 1_048_576)
+    result = Enum.find_value(1..100, fn _ -> with :ok <- :gen_tcp.send(socket, chunk), do: nil end)
+
+    assert result == {:error, :timeout}
   end
 end
