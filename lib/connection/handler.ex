@@ -8,9 +8,11 @@ defmodule RabbitMQStream.Connection.Handler do
 
   def handle_message(%Connection{} = conn, %Request{command: :close} = request) do
     Logger.debug("Connection close requested by server: #{request.data.code} #{request.data.reason}")
-    Logger.debug("Connection closed")
 
-    %{conn | state: :closing, close_reason: request.data.reason}
+    # Handled like a dropped socket once the reply below is sent, so it reconnects (or stops).
+    send(self(), {:server_close, conn.socket, request.data.reason})
+
+    conn
     |> Helpers.push_internal(:response, :close, correlation_id: request.correlation_id, code: :ok)
   end
 

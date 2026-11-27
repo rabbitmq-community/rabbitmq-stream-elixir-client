@@ -283,4 +283,28 @@ defmodule RabbitMQStreamTest.ConnectionReconnect do
     assert final_conn.connect_requests == []
     assert_receive {^ref, {:error, :closed}}
   end
+
+  test "a close sent by the server reconnects like a dropped socket" do
+    conn = conn(state: :open, socket: :fake_socket, producers: %{1 => self()}, backoff: Backoff.init(:exponential))
+
+    assert {:noreply, new_conn} = Lifecycle.handle_info({:server_close, :fake_socket, "unknown frame"}, conn)
+
+    assert new_conn.state == :reconnecting
+    assert new_conn.reconnect_targets == [self()]
+    assert_receive {:closed, :fake_socket}
+    assert_receive {:connection_lost}
+  end
+
+  test "a close sent by the server stops the connection when reconnect is off" do
+    conn = conn(state: :open, socket: :fake_socket, options: [reconnect: false], backoff: Backoff.init(:exponential))
+
+    assert {:stop, {:shutdown, {:connection_closed, "unknown frame"}}, _conn} =
+             Lifecycle.handle_info({:server_close, :fake_socket, "unknown frame"}, conn)
+  end
+
+  test "a server close for an already-replaced socket is ignored" do
+    conn = conn(state: :connecting, socket: :new_socket, reconnect_attempts: 1, backoff: Backoff.init(:exponential))
+
+    assert {:noreply, ^conn} = Lifecycle.handle_info({:server_close, :old_socket, "unknown frame"}, conn)
+  end
 end
