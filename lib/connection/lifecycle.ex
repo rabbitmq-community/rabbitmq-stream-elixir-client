@@ -317,6 +317,8 @@ defmodule RabbitMQStream.Connection.Lifecycle do
     Logger.debug("Reconnect attempt #{attempt} to #{conn.options[:host]}:#{conn.options[:port]}")
 
     with {:ok, conn} <- connect(conn) do
+      Process.send_after(self(), {:handshake_timeout, conn.socket}, conn.options[:connect_timeout])
+
       conn =
         conn
         |> Helpers.push_internal(:request, :peer_properties)
@@ -330,6 +332,18 @@ defmodule RabbitMQStream.Connection.Lifecycle do
   end
 
   def handle_info({:reconnect_attempt, _attempt}, conn), do: {:noreply, conn}
+
+  # A broker that accepted the socket but never finished the handshake: count it as a failed attempt.
+  def handle_info({:handshake_timeout, socket}, %Connection{socket: socket, state: state} = conn)
+      when state in [:connecting, :opening] do
+    Logger.warning("Reconnect attempt #{conn.reconnect_attempts} timed out during the handshake")
+
+    %{conn | close_reason: :handshake_timeout}
+    |> discard_session()
+    |> schedule_reconnect(conn.reconnect_attempts + 1)
+  end
+
+  def handle_info({:handshake_timeout, _socket}, conn), do: {:noreply, conn}
 
   # I'm not really sure how to test this behavior at the moment.
   def handle_info(:flush_request_buffer, %Connection{} = conn) do

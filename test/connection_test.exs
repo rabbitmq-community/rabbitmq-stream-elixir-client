@@ -249,4 +249,37 @@ defmodule RabbitMQStreamTest.Connection do
 
     assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, {:connection_closed, :tcp_closed}}}, 1_000
   end
+
+  test "recovers after a reconnect attempt stalls in the handshake" do
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false])
+    {:ok, silent_port} = :inet.port(listener)
+
+    {:ok, conn} =
+      Connection.start_link(
+        host: "localhost",
+        vhost: "/",
+        connect_timeout: 200,
+        backoff: {:exponential, initial: 10, max: 50}
+      )
+
+    :ok = Connection.connect(conn)
+    %Connection{socket: socket} = :sys.get_state(conn)
+
+    # Reconnect attempts now reach a listener that accepts the socket but never answers.
+    :sys.replace_state(conn, &put_in(&1.options[:port], silent_port))
+
+    capture_log(fn ->
+      send(conn, {:tcp_closed, socket})
+      Process.sleep(1_000)
+    end)
+
+    assert %Connection{state: state, reconnect_attempts: attempts} = :sys.get_state(conn)
+    assert state in [:reconnecting, :connecting]
+    assert attempts >= 2
+
+    :sys.replace_state(conn, &put_in(&1.options[:port], 5552))
+    assert :ok = Connection.connect(conn, 5_000)
+
+    GenServer.stop(conn)
+  end
 end
