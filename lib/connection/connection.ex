@@ -49,9 +49,10 @@ defmodule RabbitMQStream.Connection do
   # Connection states
 
   A connection moves through `:closed` -> `:connecting` -> `:opening` -> `:open` on startup, and
-  `:closing` -> `:closed` on an orderly shutdown. If the underlying socket drops while `:open` (or
-  while reconnecting) and `reconnect` is enabled, it instead moves to `:reconnecting` and back to
-  `:connecting` -> `:opening` -> `:open` once a retry succeeds.
+  `:closing` -> `:closed` on an orderly shutdown. If the underlying socket drops, or the server
+  closes the connection, while `:open` (or while reconnecting) and `reconnect` is enabled, it
+  instead moves to `:reconnecting` and back to `:connecting` -> `:opening` -> `:open` once a retry
+  succeeds.
 
 
   # Consuming messages

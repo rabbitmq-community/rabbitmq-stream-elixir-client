@@ -85,4 +85,15 @@ defmodule RabbitMQStreamTest.ConnectionHandler do
              errors: [%Error{publishing_id: 42, code: :stream_does_not_exist}]
            } = Data.decode(%Request{version: 1, command: :publish_error}, buffer)
   end
+
+  test "a close requested by the server is answered, then handed over as a drop" do
+    conn = %{conn(%{}) | socket: :fake_socket}
+    request = %Request{version: 1, command: :close, correlation_id: 3, data: %{code: :ok, reason: "bye"}}
+
+    new_conn = Handler.handle_message(conn, request)
+
+    assert new_conn.state == :open
+    assert [{:response, :close, [correlation_id: 3, code: :ok]}] = :queue.to_list(new_conn.internal_buffer)
+    assert_receive {:server_close, :fake_socket, "bye"}
+  end
 end

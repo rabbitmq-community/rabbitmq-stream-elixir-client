@@ -300,6 +300,13 @@ defmodule RabbitMQStream.Connection.Lifecycle do
 
   def handle_info({:heartbeat, _stale_socket}, conn), do: {:noreply, conn}
 
+  def handle_info({:server_close, socket, reason}, %Connection{socket: socket} = conn) do
+    %{conn | close_reason: reason}
+    |> handle_drop()
+  end
+
+  def handle_info({:server_close, _stale_socket, _reason}, conn), do: {:noreply, conn}
+
   def handle_info(:flush_request_buffer, %Connection{state: :closed} = conn) do
     Logger.warning("Connection is closed. Ignoring flush buffer request.")
     {:noreply, conn}

@@ -317,6 +317,31 @@ defmodule RabbitMQStreamTest.Producer do
     assert log =~ "dropping 1 held messages"
   end
 
+  @stream "producer-test-09"
+  @reference_name "producer-test-reference-09"
+  test "redeclares itself after the broker closes its connection with a close frame" do
+    Process.register(self(), :producer_confirm_test_listener)
+
+    {:ok, producer} = ConfirmingProducer.start_link(reference_name: @reference_name, stream_name: @stream)
+
+    ConfirmingProducer.publish(inspect(%{message: "before the close"}))
+    assert_confirmed()
+
+    %{connection: conn} = :sys.get_state(producer)
+    %Connection{socket: socket} = :sys.get_state(conn)
+    :erlang.trace(producer, true, [:receive])
+
+    # The broker answers a request with an unknown key by sending a close frame.
+    :ok = :gen_tcp.send(socket, <<4::32, 0x7FFF::16, 1::16>>)
+
+    assert_receive {:trace, ^producer, :receive, {:connection_reconnected}}, 5_000
+
+    ConfirmingProducer.publish(inspect(%{message: "after the close"}))
+    assert_confirmed()
+
+    SupervisedConnection.delete_stream(@stream)
+  end
+
   defp collect_confirms(count, acc \\ [])
   defp collect_confirms(count, acc) when length(acc) >= count, do: Enum.sort(acc)
 
